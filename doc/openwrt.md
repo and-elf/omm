@@ -61,3 +61,13 @@ server), so the ubus surface and its ACL stay in sync.
   needed for the direct-download packages. Bump `PKG_VERSION`/`PKG_HASH` in
   [`package/meshd/Makefile`](../package/meshd/Makefile) per release before
   submitting to a feed.
+- **opkg feed.** The release workflow also runs
+  [`scripts/make-feed-index.sh`](../scripts/make-feed-index.sh) over the built
+  `.ipk`s to publish an opkg index (`Packages`/`Packages.gz`) as release assets,
+  so a release doubles as a feed (see
+  [Releases & Installation](../README.md#releases--installation)).
+
+  Two follow-ups: the index is **unsigned** (add usign signing + ship the public
+  key so `opkg` can verify it), and the feed URL is **per-release** (a stable
+  rolling feed — e.g. a `gh-pages` branch aggregating versions — would let
+  `opkg update` track new releases without editing `customfeeds.conf`).

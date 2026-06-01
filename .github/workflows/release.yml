@@ -123,18 +123,24 @@ jobs:
     # Only publish for real tag pushes; workflow_dispatch is a dry run.
     if: startsWith(github.ref, 'refs/tags/')
     steps:
+      - uses: actions/checkout@v4
       - name: Collect packages
         uses: actions/download-artifact@v4
         with:
           pattern: packages-*
           path: dist
           merge-multiple: true
+      - name: Build opkg feed index
+        # Lets users add the release as a feed instead of downloading each .ipk:
+        #   src/gz omm https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: ./scripts/make-feed-index.sh dist
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           assets=$(find dist -type f \( -name '*.ipk' -o -name '*.apk' \))
+          assets="$assets dist/Packages dist/Packages.gz"
           echo "Attaching:"; echo "$assets"
           # Idempotent: re-running the workflow (or re-pushing the tag) must not
           # fail just because a release for this tag already exists. Create it

@@ -93,6 +93,22 @@ apk add --allow-untrusted meshd-<version>-<arch>.apk
 If your subtarget is not listed above, the binary is still compatible within
 its ISA group; install with `opkg install --force-architecture`.
 
+### As an opkg feed
+
+Each release also ships an opkg index (`Packages`/`Packages.gz`), so you can add
+the release as a feed and let `opkg` pick the matching arch and resolve updates:
+
+```sh
+echo 'src/gz omm https://github.com/and-elf/omm/releases/download/v0.2.0' >> /etc/opkg/customfeeds.conf
+opkg update
+opkg install meshd
+```
+
+The index is not yet signed, so either add `option check_signature 0` for this
+feed or use `opkg --no-check-certificate`/`opkg install ... --nocheckhash`
+as appropriate. Feed signing (usign) and a stable rolling feed URL are planned;
+see [OpenWrt Integration & Packaging](doc/openwrt.md).
+
 Build the single-binary product (frontend + daemon) locally with
 `./scripts/build.sh` — see [Architecture & Components](doc/architecture.md).
 
