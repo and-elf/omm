@@ -22,6 +22,7 @@ type apiHandler struct {
 	enrollment     *enrollment.Service
 	self           *identity.Identity
 	selfSerial     string
+	selfHomeID     string
 }
 
 // Option customizes the router/handler.
@@ -40,6 +41,12 @@ func WithSelf(id *identity.Identity, serial string) Option {
 		h.self = id
 		h.selfSerial = serial
 	}
+}
+
+// WithSelfHome identifies the Home this daemon controls, used by the setup
+// endpoints to report and name the device's own Home.
+func WithSelfHome(homeID string) Option {
+	return func(h *apiHandler) { h.selfHomeID = homeID }
 }
 
 type statusResponse struct {
@@ -67,9 +74,12 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 
 	r.Get("/health", healthHandler)
 	r.Get("/status", statusHandler)
+	r.Get("/setup", h.getSetup)
+	r.Post("/setup/complete", h.completeSetup)
 	r.Get("/homes", h.listHomes)
 	r.Post("/homes", h.createHome)
 	r.Get("/homes/{homeID}", h.getHome)
+	r.Put("/homes/{homeID}", h.updateHome)
 	r.Get("/homes/{homeID}/profile", h.getProfile)
 	r.Post("/homes/{homeID}/profile", h.createProfile)
 	r.Get("/nodes", h.listNodes)

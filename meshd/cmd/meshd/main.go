@@ -61,6 +61,7 @@ func main() {
 	router := api.NewRouter(store, profileManager,
 		api.WithEnrollment(enrollSvc),
 		api.WithSelf(id, cfg.Serial),
+		api.WithSelfHome(cfg.HomeID),
 	)
 
 	// Announce this controller's presence for discovery.

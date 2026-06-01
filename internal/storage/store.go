@@ -16,6 +16,7 @@ type Store interface {
 	ListHomes(ctx context.Context) ([]models.Home, error)
 	GetHome(ctx context.Context, id string) (models.Home, error)
 	CreateHome(ctx context.Context, home models.Home) error
+	UpdateHome(ctx context.Context, home models.Home) error
 	ListNodes(ctx context.Context) ([]models.Node, error)
 	GetNode(ctx context.Context, id string) (models.Node, error)
 	CreateNode(ctx context.Context, node models.Node) error
@@ -28,9 +29,14 @@ type Store interface {
 	UpdateEnrollment(ctx context.Context, enrollment models.Enrollment) error
 	GetActiveHome(ctx context.Context) (string, error)
 	SetActiveHome(ctx context.Context, homeID string) error
+	GetSetupComplete(ctx context.Context) (bool, error)
+	SetSetupComplete(ctx context.Context, complete bool) error
 }
 
-const settingActiveHome = "active_home"
+const (
+	settingActiveHome    = "active_home"
+	settingSetupComplete = "setup_complete"
+)
 
 type sqliteStore struct {
 	db *sql.DB
@@ -82,6 +88,52 @@ func (s *sqliteStore) CreateHome(ctx context.Context, home models.Home) error {
 	)
 	if err != nil {
 		return fmt.Errorf("insert home: %w", err)
+	}
+	return nil
+}
+
+func (s *sqliteStore) UpdateHome(ctx context.Context, home models.Home) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE homes SET name = ?, controller = ? WHERE id = ?`,
+		home.Name, home.Controller, home.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update home: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *sqliteStore) GetSetupComplete(ctx context.Context) (bool, error) {
+	var value string
+	row := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, settingSetupComplete)
+	if err := row.Scan(&value); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return value == "1", nil
+}
+
+func (s *sqliteStore) SetSetupComplete(ctx context.Context, complete bool) error {
+	value := "0"
+	if complete {
+		value = "1"
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		settingSetupComplete, value,
+	)
+	if err != nil {
+		return fmt.Errorf("set setup complete: %w", err)
 	}
 	return nil
 }
