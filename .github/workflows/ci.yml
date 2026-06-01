@@ -143,3 +143,26 @@ jobs:
           name: meshd-apk
           path: build/*.apk
           if-no-files-found: error
+
+  e2e:
+    name: E2E (OpenWrt containers)
+    runs-on: ubuntu-latest
+    needs: [go-unit, go-integration]
+    env:
+      # The binary must be static (no glibc) to run on OpenWrt's musl userland
+      # inside the container images.
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build static binary and OpenWrt packages
+        run: |
+          SKIP_FRONTEND=1 ./scripts/build.sh
+          ./scripts/package-ipk.sh
+          ./scripts/package-apk.sh
+      # ubuntu-latest ships Docker, so testcontainers connects automatically.
+      - name: Run end-to-end tests
+        run: go test -tags e2e -timeout 25m -v ./internal/e2e/...

@@ -96,9 +96,19 @@ enrolling in parallel all reach `active` and appear exactly once in
 The e2e suite (testcontainers-go, build tag `e2e`) runs against real OpenWrt
 container images with the built package installed:
 
-- **23.05** image + `opkg install meshd_*.ipk`
-- **24.10** image + `apk add --allow-untrusted meshd-*.apk`
+- **23.05** image + `opkg install meshd_*.ipk` (a real opkg package: a gzip tar
+  of `debian-binary`/`control.tar.gz`/`data.tar.gz`)
+- **24.10** image + the `.apk` extracted onto the rootfs. The repo's `.apk` is a
+  plain gzip tar rather than a signed apk package, so it is installed by
+  extraction; producing a real signed apk is future work.
 
 One controller container (`MESHD_ROLE=controller`, `MESHD_AUTO_ADOPT=1`) and N
 client containers (`MESHD_ROLE=client`) are started; the test asserts all
 clients converge to `active` and the controller's node inventory matches.
+
+Run locally (Docker, or a podman socket via `DOCKER_HOST`):
+
+```sh
+./scripts/build.sh && ./scripts/package-ipk.sh && ./scripts/package-apk.sh
+go test -tags e2e -timeout 25m ./internal/e2e/...
+```
