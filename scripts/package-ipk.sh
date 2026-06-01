@@ -44,6 +44,8 @@ tar -C "$controldir" -czf "$output/control.tar.gz" .
 echo -n "2.0" > "$output/debian-binary"
 
 cd "$output"
-ar r "${pkgname}_${version}_${arch}.ipk" debian-binary control.tar.gz data.tar.gz
+# OpenWrt ipk packages are a gzip-compressed tar of these three members (not an
+# ar archive like Debian .deb), which is what opkg expects.
+tar -czf "${pkgname}_${version}_${arch}.ipk" ./debian-binary ./control.tar.gz ./data.tar.gz
 
 echo "Created $output/${pkgname}_${version}_${arch}.ipk"
