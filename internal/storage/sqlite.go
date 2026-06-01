@@ -10,14 +10,24 @@ import (
 )
 
 func OpenDB(path string) (*sql.DB, error) {
-	dir := dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("create database directory: %w", err)
+	dsn, inMemory := buildDSN(path)
+
+	if !inMemory {
+		if err := os.MkdirAll(dir(path), 0o755); err != nil {
+			return nil, fmt.Errorf("create database directory: %w", err)
+		}
 	}
 
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
+	}
+
+	if inMemory {
+		// A shared-cache in-memory database exists only while a connection is
+		// open. Pin a single connection so the schema and data persist for the
+		// lifetime of the *sql.DB and are visible across all callers.
+		db.SetMaxOpenConns(1)
 	}
 
 	if err := initializeSchema(db); err != nil {
@@ -26,6 +36,18 @@ func OpenDB(path string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+// buildDSN constructs a modernc.org/sqlite DSN. File-backed databases use WAL
+// journaling plus a busy timeout so concurrent writers (e.g. many nodes
+// enrolling at once) wait for the lock instead of failing with SQLITE_BUSY.
+func buildDSN(path string) (dsn string, inMemory bool) {
+	if path == "" || path == ":memory:" {
+		// Pinned to a single connection by the caller, so a plain in-memory
+		// database stays private to this *sql.DB and consistent across calls.
+		return ":memory:", true
+	}
+	return "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", false
 }
 
 func dir(path string) string {
