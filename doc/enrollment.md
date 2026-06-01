@@ -5,18 +5,33 @@ This document specifies the discovery + enrollment flow between an unclaimed
 described in the [README](../README.md). It is the contract exercised by the
 container-based end-to-end tests.
 
-## Roles
+## Roles are not a startup mode
 
-`meshd` runs in one of two roles (set via `MESHD_ROLE`, default `controller`):
+There is no fixed controller/client role. Every `meshd` daemon:
 
-- **controller** — coordinates a Home: announces itself, accepts enrollment
-  requests, approves (adopts) nodes, and distributes profiles.
-- **client** — an unclaimed node that discovers a controller and enrolls.
+- **controls its own Home** — it announces itself, accepts enrollment requests,
+  approves (adopts) nodes, and distributes profiles for `MESHD_HOME_ID`; and
+- **can enroll into other controllers as a node** — a runtime action, triggered
+  by `POST /enroll/join` or the `MESHD_JOIN` startup list.
 
-A node carries a persistent **device identity**: an ECDSA P-256 key pair and a
-self-signed certificate, generated on first start and stored under
+So a single device can be the controller of one Home and a member node of N
+other Homes at the same time. Membership spans many Homes, but a device is only
+ever **active** in one Home at a time (one applied profile); joining adds
+membership, it does not switch the active Home.
+
+Every daemon carries a persistent **device identity**: an ECDSA P-256 key pair
+and a self-signed certificate, generated on first start and stored under
 `/etc/meshd/identity/` (`key.pem`, `cert.pem`). The node ID is the lowercase
 hex SHA-256 of the DER public key.
+
+### Joining another Home
+
+```
+POST /enroll/join { "controller_url": "http://other:8080", "serial": "..." }
+```
+
+The daemon runs the request → verify → approve → ack exchange below against the
+target controller, using its own device identity, and returns the final result.
 
 ## Discovery
 

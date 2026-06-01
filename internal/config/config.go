@@ -1,24 +1,21 @@
 package config
 
-import "os"
-
-// Role determines whether meshd acts as a controller or an enrolling client.
-type Role string
-
-const (
-	RoleController Role = "controller"
-	RoleClient     Role = "client"
+import (
+	"os"
+	"strings"
 )
 
+// Config holds the meshd daemon settings. A daemon always runs as a controller
+// for its own Home and can additionally enroll into other controllers (as a
+// node) at runtime or via Join.
 type Config struct {
-	Role         Role
 	HTTPAddr     string
 	DatabasePath string
 	UDPListen    string
 	UbusSocket   string
 	UbusBinary   string
 
-	// Controller settings.
+	// This daemon's own Home (controller capability).
 	HomeID       string
 	HomeName     string
 	ControllerID string
@@ -26,15 +23,14 @@ type Config struct {
 	APIAdvertise string // API URL announced to clients (defaults to HTTPAddr)
 	UDPBroadcast string // broadcast endpoint for announcements
 
-	// Client settings.
-	IdentityDir   string
-	ControllerURL string // explicit controller API URL; empty means UDP discovery
-	Serial        string
+	// Device identity and homes to join at startup.
+	IdentityDir string
+	Serial      string
+	Join        []string // controller URLs to enroll into on boot
 }
 
 func Load() Config {
 	return Config{
-		Role:         Role(envOr("MESHD_ROLE", string(RoleController))),
 		HTTPAddr:     envOr("MESHD_HTTP_ADDR", "0.0.0.0:8080"),
 		DatabasePath: envOr("MESHD_DATABASE_PATH", "./meshd.db"),
 		UDPListen:    envOr("MESHD_UDP_LISTEN", ":45678"),
@@ -48,9 +44,9 @@ func Load() Config {
 		APIAdvertise: os.Getenv("MESHD_API_ADVERTISE"),
 		UDPBroadcast: envOr("MESHD_UDP_BROADCAST", "255.255.255.255:45678"),
 
-		IdentityDir:   envOr("MESHD_IDENTITY_DIR", "/etc/meshd/identity"),
-		ControllerURL: os.Getenv("MESHD_CONTROLLER"),
-		Serial:        envOr("MESHD_SERIAL", hostnameOr("unknown")),
+		IdentityDir: envOr("MESHD_IDENTITY_DIR", "/etc/meshd/identity"),
+		Serial:      envOr("MESHD_SERIAL", hostnameOr("unknown")),
+		Join:        splitList(os.Getenv("MESHD_JOIN")),
 	}
 }
 
@@ -68,6 +64,19 @@ func envBool(key string) bool {
 	default:
 		return false
 	}
+}
+
+func splitList(value string) []string {
+	if value == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func hostnameOr(fallback string) string {

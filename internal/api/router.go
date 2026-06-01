@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/and-elf/omm/internal/enrollment"
+	"github.com/and-elf/omm/internal/identity"
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/profiles"
 	"github.com/and-elf/omm/internal/storage"
@@ -19,14 +20,26 @@ type apiHandler struct {
 	store          storage.Store
 	profileManager profiles.ProfileManager
 	enrollment     *enrollment.Service
+	self           *identity.Identity
+	selfSerial     string
 }
 
 // Option customizes the router/handler.
 type Option func(*apiHandler)
 
-// WithEnrollment registers the controller-side enrollment endpoints.
+// WithEnrollment registers the controller-side enrollment endpoints, letting
+// this daemon act as a controller for its Home.
 func WithEnrollment(svc *enrollment.Service) Option {
 	return func(h *apiHandler) { h.enrollment = svc }
+}
+
+// WithSelf supplies this daemon's device identity, enabling the /enroll/join
+// endpoint so it can enroll into other controllers as a node.
+func WithSelf(id *identity.Identity, serial string) Option {
+	return func(h *apiHandler) {
+		h.self = id
+		h.selfSerial = serial
+	}
 }
 
 type statusResponse struct {
@@ -69,6 +82,12 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 		r.Get("/enroll/{enrollmentID}", h.enrollStatus)
 		r.Post("/enroll/{enrollmentID}/ack", h.enrollAck)
 		r.Post("/nodes/{nodeID}/adopt", h.adoptNode)
+	}
+
+	// A daemon with a device identity can enroll into other controllers as a
+	// node, independently of hosting its own Home.
+	if h.self != nil {
+		r.Post("/enroll/join", h.enrollJoin)
 	}
 
 	// Serve the embedded Progressive Web App for any non-API route. This is

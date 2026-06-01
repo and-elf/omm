@@ -56,6 +56,13 @@ type Client struct {
 	machine *stateless.StateMachine
 }
 
+// Join enrolls the given identity into the controller at controllerURL and
+// returns the final result. It is a convenience wrapper around New + Enroll for
+// callers (such as the /enroll/join endpoint) that enroll on demand.
+func Join(ctx context.Context, id *identity.Identity, controllerURL, serial string, opts Options) (enrollment.Result, error) {
+	return New(id, controllerURL, opts).Enroll(ctx, serial)
+}
+
 // New creates a client for the given identity targeting controllerURL.
 func New(id *identity.Identity, controllerURL string, opts Options) *Client {
 	httpClient := opts.HTTPClient

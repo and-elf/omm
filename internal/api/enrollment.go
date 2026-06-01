@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/and-elf/omm/internal/client"
 	"github.com/and-elf/omm/internal/enrollment"
 	"github.com/and-elf/omm/internal/storage"
 )
@@ -61,6 +62,38 @@ func (h *apiHandler) adoptNode(w http.ResponseWriter, r *http.Request) {
 	result, err := h.enrollment.Adopt(r.Context(), chi.URLParam(r, "nodeID"))
 	if err != nil {
 		respondEnrollError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// joinInput is the body of POST /enroll/join.
+type joinInput struct {
+	ControllerURL string `json:"controller_url"`
+	Serial        string `json:"serial"`
+}
+
+// enrollJoin makes this daemon enroll into another controller as a node, using
+// its own device identity. The caller (e.g. a test or operator) decides the
+// topology; a daemon can be a controller for its own Home and join others.
+func (h *apiHandler) enrollJoin(w http.ResponseWriter, r *http.Request) {
+	var in joinInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	if in.ControllerURL == "" {
+		respondError(w, http.StatusBadRequest, errMissingFields("controller_url"))
+		return
+	}
+	serial := in.Serial
+	if serial == "" {
+		serial = h.selfSerial
+	}
+
+	result, err := client.Join(r.Context(), h.self, in.ControllerURL, serial, client.Options{})
+	if err != nil {
+		respondError(w, http.StatusBadGateway, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

@@ -4,9 +4,10 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
+
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/and-elf/omm/internal/api"
 	"github.com/and-elf/omm/internal/client"
@@ -26,21 +27,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	switch cfg.Role {
-	case config.RoleClient:
-		runClient(ctx, cfg)
-	default:
-		runController(ctx, cfg)
+	// Every daemon has a device identity, so it can enroll into other
+	// controllers as a node.
+	id, err := identity.LoadOrCreate(cfg.IdentityDir)
+	if err != nil {
+		log.Fatalf("failed to load device identity: %v", err)
 	}
-}
 
-func runController(ctx context.Context, cfg config.Config) {
 	db, err := storage.OpenDB(cfg.DatabasePath)
 	if err != nil {
 		log.Fatalf("failed to open database: %v", err)
 	}
 	defer db.Close()
-
 	store := storage.NewStore(db)
 
 	uciClient, err := uci.NewClient(uci.Options{SocketPath: cfg.UbusSocket, BinaryPath: cfg.UbusBinary})
@@ -49,8 +47,7 @@ func runController(ctx context.Context, cfg config.Config) {
 	}
 	defer uciClient.Close()
 
-	// Ensure this controller's Home exists so profiles and enrollments can
-	// reference it.
+	// Ensure this daemon's own Home exists so it can act as its controller.
 	if _, err := store.GetHome(ctx, cfg.HomeID); err == storage.ErrNotFound {
 		if err := store.CreateHome(ctx, models.Home{
 			ID: cfg.HomeID, Name: cfg.HomeName, Controller: cfg.ControllerID, LastSeen: time.Now().Unix(),
@@ -61,9 +58,12 @@ func runController(ctx context.Context, cfg config.Config) {
 
 	profileManager := profiles.NewManager(store, uciClient)
 	enrollSvc := enrollment.NewService(store, enrollment.Options{HomeID: cfg.HomeID, AutoAdopt: cfg.AutoAdopt})
-	router := api.NewRouter(store, profileManager, api.WithEnrollment(enrollSvc))
+	router := api.NewRouter(store, profileManager,
+		api.WithEnrollment(enrollSvc),
+		api.WithSelf(id, cfg.Serial),
+	)
 
-	// Announce controller presence for client discovery.
+	// Announce this controller's presence for discovery.
 	apiURL := cfg.APIAdvertise
 	if apiURL == "" {
 		apiURL = "http://" + cfg.HTTPAddr
@@ -77,14 +77,20 @@ func runController(ctx context.Context, cfg config.Config) {
 
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: router}
 	go func() {
-		log.Printf("meshd controller listening on %s (home=%s auto_adopt=%v)", cfg.HTTPAddr, cfg.HomeID, cfg.AutoAdopt)
+		log.Printf("meshd up node_id=%s home=%s addr=%s auto_adopt=%v", id.NodeID(), cfg.HomeID, cfg.HTTPAddr, cfg.AutoAdopt)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server failed: %v", err)
 		}
 	}()
 
+	// Optionally enroll into other homes at startup (membership; a device is
+	// only ever active in one home at a time).
+	for _, controllerURL := range cfg.Join {
+		go joinHome(ctx, id, cfg.Serial, controllerURL, profileManager)
+	}
+
 	<-ctx.Done()
-	log.Println("shutting down meshd controller")
+	log.Println("shutting down meshd")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -92,62 +98,25 @@ func runController(ctx context.Context, cfg config.Config) {
 	}
 }
 
-func runClient(ctx context.Context, cfg config.Config) {
-	id, err := identity.LoadOrCreate(cfg.IdentityDir)
-	if err != nil {
-		log.Fatalf("failed to load device identity: %v", err)
-	}
-	log.Printf("meshd client node_id=%s serial=%s", id.NodeID(), cfg.Serial)
-
-	controllerURL := cfg.ControllerURL
-	if controllerURL == "" {
-		log.Printf("discovering controller on %s", cfg.UDPListen)
-		ann, err := discovery.DiscoverController(ctx, cfg.UDPListen)
-		if err != nil {
-			log.Fatalf("controller discovery failed: %v", err)
-		}
-		controllerURL = ann.API
-		log.Printf("discovered controller %s at %s", ann.HomeID, controllerURL)
-	}
-
-	c := client.New(id, controllerURL, client.Options{})
-
-	// Retry until enrolled or the process is asked to stop; the controller may
-	// not be reachable the instant the client starts.
-	result, err := enrollWithRetry(ctx, c, cfg.Serial)
-	if err != nil {
-		log.Fatalf("enrollment failed: %v", err)
-	}
-	log.Printf("node active node_id=%s home_status=%s", id.NodeID(), result.Status)
-
-	if result.Profile != nil {
-		uciClient, err := uci.NewClient(uci.Options{SocketPath: cfg.UbusSocket, BinaryPath: cfg.UbusBinary})
-		if err != nil {
-			log.Printf("uci client unavailable, skipping profile apply: %v", err)
-		} else {
-			defer uciClient.Close()
-			pm := profiles.NewManager(nil, uciClient)
-			if err := pm.ApplyProfile(ctx, *result.Profile); err != nil {
-				log.Printf("apply profile failed: %v", err)
-			}
-		}
-	}
-
-	<-ctx.Done()
-	log.Println("shutting down meshd client")
-}
-
-func enrollWithRetry(ctx context.Context, c *client.Client, serial string) (enrollment.Result, error) {
+// joinHome enrolls this device into another controller, retrying until it
+// succeeds or the daemon stops.
+func joinHome(ctx context.Context, id *identity.Identity, serial, controllerURL string, pm profiles.ProfileManager) {
 	const retry = 3 * time.Second
 	for {
-		result, err := c.Enroll(ctx, serial)
+		result, err := client.Join(ctx, id, controllerURL, serial, client.Options{})
 		if err == nil {
-			return result, nil
+			log.Printf("joined controller %s status=%s", controllerURL, result.Status)
+			if result.Profile != nil {
+				if err := pm.ApplyProfile(ctx, *result.Profile); err != nil {
+					log.Printf("apply profile from %s failed: %v", controllerURL, err)
+				}
+			}
+			return
 		}
-		log.Printf("enroll attempt failed, retrying in %s: %v", retry, err)
+		log.Printf("join %s failed, retrying in %s: %v", controllerURL, retry, err)
 		select {
 		case <-ctx.Done():
-			return enrollment.Result{}, ctx.Err()
+			return
 		case <-time.After(retry):
 		}
 	}

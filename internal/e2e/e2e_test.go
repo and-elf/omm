@@ -1,19 +1,21 @@
 //go:build e2e
 
 // Package e2e runs the enrollment flow against real OpenWrt container images
-// with the built package installed. It is gated behind the `e2e` build tag and
-// requires a Docker-compatible runtime (Docker or a podman socket).
+// with the built package installed. Every container runs the same role-less
+// meshd daemon; the test itself drives who enrolls into whom.
 //
 // Run with:
 //
 //	./scripts/build.sh && ./scripts/package-ipk.sh && ./scripts/package-apk.sh
-//	go test -tags e2e -timeout 20m ./internal/e2e/...
+//	go test -tags e2e -timeout 25m ./internal/e2e/...
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -96,140 +98,175 @@ func runE2E(t *testing.T, tg target, clients int) {
 	}
 	t.Cleanup(func() { _ = net.Remove(ctx) })
 
-	pkgFile := testcontainers.ContainerFile{
-		HostFilePath:      pkgPath,
-		ContainerFilePath: tg.destPath,
-		FileMode:          0o644,
-	}
+	h := &harness{t: t, ctx: ctx, tg: tg, net: net.Name, pkgPath: pkgPath}
 
-	// Controller.
-	controllerScript := fmt.Sprintf(
-		"%s && MESHD_ROLE=controller MESHD_HTTP_ADDR=0.0.0.0:8080 "+
-			"MESHD_DATABASE_PATH=/tmp/meshd.db MESHD_HOME_ID=home-e2e MESHD_AUTO_ADOPT=1 "+
-			"exec /usr/bin/meshd", tg.installSh)
-
-	controller, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image:          tg.image,
-			Networks:       []string{net.Name},
-			NetworkAliases: map[string][]string{net.Name: {"controller"}},
-			ExposedPorts:   []string{"8080/tcp"},
-			Files:          []testcontainers.ContainerFile{pkgFile},
-			Entrypoint:     []string{"/bin/sh", "-c", controllerScript},
-			WaitingFor:     wait.ForHTTP("/health").WithPort("8080/tcp").WithStartupTimeout(120 * time.Second),
-		},
-		Started: true,
+	// One daemon acts as the home-e2e controller; the rest are identical
+	// daemons that the test will tell to enroll into it.
+	controller := h.startDaemon("controller", map[string]string{
+		"MESHD_HOME_ID": "home-e2e", "MESHD_SERIAL": "controller",
 	})
-	if err != nil {
-		t.Fatalf("start controller: %v", err)
-	}
-	t.Cleanup(func() { _ = controller.Terminate(ctx) })
 
-	// N clients enrolling concurrently.
+	clientC := make([]testcontainers.Container, clients)
 	var wg sync.WaitGroup
-	errs := make(chan error, clients)
-	containers := make([]testcontainers.Container, clients)
-	var mu sync.Mutex
-
 	for i := 0; i < clients; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			clientScript := fmt.Sprintf(
-				"%s && MESHD_ROLE=client MESHD_CONTROLLER=http://controller:8080 "+
-					"MESHD_IDENTITY_DIR=/tmp/id MESHD_SERIAL=client-%d "+
-					"exec /usr/bin/meshd", tg.installSh, i)
-
-			c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-				ContainerRequest: testcontainers.ContainerRequest{
-					Image:      tg.image,
-					Networks:   []string{net.Name},
-					Files:      []testcontainers.ContainerFile{pkgFile},
-					Entrypoint: []string{"/bin/sh", "-c", clientScript},
-					WaitingFor: wait.ForLog("node active").WithStartupTimeout(150 * time.Second),
-				},
-				Started: true,
+			alias := fmt.Sprintf("client-%d", i)
+			clientC[i] = h.startDaemon(alias, map[string]string{
+				"MESHD_HOME_ID": "home-" + alias, "MESHD_SERIAL": alias,
 			})
+		}(i)
+	}
+	wg.Wait()
+
+	// All clients enroll into the controller concurrently — the topology is
+	// decided here, not by the container config.
+	errs := make(chan error, clients)
+	for i := 0; i < clients; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			res, err := h.join(clientC[i], "http://controller:8080", fmt.Sprintf("client-%d", i))
 			if err != nil {
-				errs <- fmt.Errorf("client-%d: %w", i, err)
+				errs <- fmt.Errorf("client-%d join: %w", i, err)
 				return
 			}
-			mu.Lock()
-			containers[i] = c
-			mu.Unlock()
+			if res.Status != "active" {
+				errs <- fmt.Errorf("client-%d status %q", i, res.Status)
+			}
 		}(i)
 	}
 	wg.Wait()
 	close(errs)
-
-	for _, c := range containers {
-		if c != nil {
-			c := c
-			t.Cleanup(func() { _ = c.Terminate(ctx) })
-		}
-	}
 	for err := range errs {
-		t.Fatalf("client enrollment failed: %v", err)
+		t.Fatalf("%v", err)
 	}
 
-	// Assert the controller inventory contains exactly the N enrolled nodes.
-	base, err := controllerBaseURL(ctx, controller)
-	if err != nil {
-		t.Fatalf("controller url: %v", err)
-	}
-
-	nodes := fetchNodes(t, base)
+	// The controller's Home now holds exactly the N enrolled nodes, all unique.
+	nodes := h.nodes(controller)
 	if len(nodes) != clients {
 		t.Fatalf("expected %d enrolled nodes, got %d: %+v", clients, len(nodes), nodes)
 	}
 	seen := map[string]bool{}
 	for _, n := range nodes {
-		if n.ID == "" {
-			t.Fatalf("node with empty id: %+v", n)
-		}
-		if seen[n.ID] {
-			t.Fatalf("duplicate node id %s", n.ID)
+		if n.ID == "" || seen[n.ID] {
+			t.Fatalf("missing/duplicate node id in %+v", nodes)
 		}
 		seen[n.ID] = true
 		if n.CurrentHome != "home-e2e" {
 			t.Fatalf("node %s in unexpected home %q", n.ID, n.CurrentHome)
 		}
 	}
-	t.Logf("%s: %d nodes enrolled concurrently, all unique", tg.name, len(nodes))
+
+	// A device is both: have the controller enroll into client-0's Home. The
+	// controller now appears as a node in client-0's inventory while still
+	// hosting home-e2e — both at once, just active in only one home.
+	if _, err := h.join(controller, "http://client-0:8080", "controller"); err != nil {
+		t.Fatalf("controller join client-0: %v", err)
+	}
+	if got := len(h.nodes(clientC[0])); got != 1 {
+		t.Fatalf("client-0 should hold exactly the controller as a node, got %d", got)
+	}
+	t.Logf("%s: %d nodes enrolled concurrently; controller is also a node in client-0", tg.name, clients)
+}
+
+// harness builds and queries daemon containers for one target.
+type harness struct {
+	t       *testing.T
+	ctx     context.Context
+	tg      target
+	net     string
+	pkgPath string
+}
+
+func (h *harness) startDaemon(alias string, env map[string]string) testcontainers.Container {
+	h.t.Helper()
+	base := map[string]string{
+		"MESHD_HTTP_ADDR":     "0.0.0.0:8080",
+		"MESHD_AUTO_ADOPT":    "1",
+		"MESHD_DATABASE_PATH": "/tmp/meshd.db",
+		"MESHD_IDENTITY_DIR":  "/tmp/id",
+		"MESHD_UDP_BROADCAST": "127.0.0.1:45678",
+	}
+	for k, v := range env {
+		base[k] = v
+	}
+
+	c, err := testcontainers.GenericContainer(h.ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image:          h.tg.image,
+			Networks:       []string{h.net},
+			NetworkAliases: map[string][]string{h.net: {alias}},
+			ExposedPorts:   []string{"8080/tcp"},
+			Env:            base,
+			Files: []testcontainers.ContainerFile{{
+				HostFilePath: h.pkgPath, ContainerFilePath: h.tg.destPath, FileMode: 0o644,
+			}},
+			Entrypoint: []string{"/bin/sh", "-c", h.tg.installSh + " && exec /usr/bin/meshd"},
+			WaitingFor: wait.ForHTTP("/health").WithPort("8080/tcp").WithStartupTimeout(120 * time.Second),
+		},
+		Started: true,
+	})
+	if err != nil {
+		h.t.Fatalf("start daemon %s: %v", alias, err)
+	}
+	h.t.Cleanup(func() { _ = c.Terminate(h.ctx) })
+	return c
+}
+
+type joinResult struct {
+	Status string `json:"status"`
+}
+
+func (h *harness) join(c testcontainers.Container, controllerURL, serial string) (joinResult, error) {
+	h.t.Helper()
+	body, _ := json.Marshal(map[string]string{"controller_url": controllerURL, "serial": serial})
+	resp, err := http.Post(h.baseURL(c)+"/enroll/join", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return joinResult{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(resp.Body)
+		return joinResult{}, fmt.Errorf("status %d: %s", resp.StatusCode, msg)
+	}
+	var r joinResult
+	return r, json.NewDecoder(resp.Body).Decode(&r)
 }
 
 type node struct {
 	ID          string `json:"id"`
-	Serial      string `json:"serial"`
 	CurrentHome string `json:"current_home"`
 }
 
-func controllerBaseURL(ctx context.Context, c testcontainers.Container) (string, error) {
-	host, err := c.Host(ctx)
+func (h *harness) nodes(c testcontainers.Container) []node {
+	h.t.Helper()
+	resp, err := http.Get(h.baseURL(c) + "/nodes")
 	if err != nil {
-		return "", err
-	}
-	port, err := c.MappedPort(ctx, "8080/tcp")
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("http://%s:%s", host, port.Port()), nil
-}
-
-func fetchNodes(t *testing.T, base string) []node {
-	t.Helper()
-	resp, err := http.Get(base + "/nodes")
-	if err != nil {
-		t.Fatalf("get nodes: %v", err)
+		h.t.Fatalf("get nodes: %v", err)
 	}
 	defer resp.Body.Close()
 	var body struct {
 		Nodes []node `json:"nodes"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode nodes: %v", err)
+		h.t.Fatalf("decode nodes: %v", err)
 	}
 	return body.Nodes
+}
+
+func (h *harness) baseURL(c testcontainers.Container) string {
+	h.t.Helper()
+	host, err := c.Host(h.ctx)
+	if err != nil {
+		h.t.Fatalf("host: %v", err)
+	}
+	port, err := c.MappedPort(h.ctx, "8080/tcp")
+	if err != nil {
+		h.t.Fatalf("port: %v", err)
+	}
+	return fmt.Sprintf("http://%s:%s", host, port.Port())
 }
 
 func repoRoot(t *testing.T) string {
@@ -238,6 +275,5 @@ func repoRoot(t *testing.T) string {
 	if !ok {
 		t.Fatal("cannot determine caller")
 	}
-	// internal/e2e/e2e_test.go -> repo root is two levels up.
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
