@@ -3,6 +3,7 @@ import type {
   Enrollment,
   EnrollmentResult,
   Home,
+  HomeSelection,
   Node,
   Profile,
   Setup,
@@ -118,6 +119,10 @@ export class ApiClient {
       { method: 'POST', body: JSON.stringify({ ...profile, home_id: homeId }) },
     )
     return saved
+  }
+
+  getHomeSelection(): Promise<HomeSelection> {
+    return this.request<HomeSelection>('/home-selection')
   }
 
   async getActiveHome(): Promise<string> {

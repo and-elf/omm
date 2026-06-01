@@ -40,6 +40,19 @@ export interface Setup {
   home_name: string
 }
 
+export interface HomeSelectionCandidate {
+  home_id: string
+  signal: number
+  last_active: number
+  self_controlled: boolean
+}
+
+export interface HomeSelection {
+  recommended_home_id: string
+  active_home_id: string
+  candidates: HomeSelectionCandidate[] | null
+}
+
 export type EnrollmentStatus =
   | 'pending_verification'
   | 'pending_approval'
