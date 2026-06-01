@@ -88,6 +88,28 @@ After verification the node is `pending_approval`. Approval is performed by:
 Auto-adopt exists so the e2e suite can enroll many nodes without manual
 interaction; production defaults to manual approval.
 
+## Home selection on boot
+
+A device that is a member of several Homes activates exactly one of them. The
+choice (`internal/homeselect`) follows this precedence:
+
+1. **Explicit selection** — a Home set via the REST API wins as long as it is
+   still reachable:
+
+   ```
+   GET /active-home            -> { "home_id": "..." }   ("" if unset)
+   PUT /active-home  { "home_id": "..." }                 (must be a known Home)
+   ```
+
+2. **Automatic policy** when no explicit selection applies:
+   - prefer an externally-controlled Home over the device's own — being your
+     own controller is a **last resort**;
+   - among those, the **most recently active** Home wins;
+   - ties and never-used Homes are broken by **strongest signal (RSSI)**.
+
+RSSI is supplied by the wireless-metrics layer when available; until then the
+signal is unset and selection falls back to last-active then explicit choice.
+
 ## Node state machine
 
 Implemented with `github.com/qmuntal/stateless`:

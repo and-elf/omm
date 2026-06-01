@@ -75,6 +75,8 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 	r.Get("/nodes", h.listNodes)
 	r.Post("/nodes", h.createNode)
 	r.Get("/nodes/{nodeID}", h.getNode)
+	r.Get("/active-home", h.getActiveHome)
+	r.Put("/active-home", h.setActiveHome)
 
 	if h.enrollment != nil {
 		r.Post("/enroll/request", h.enrollRequest)

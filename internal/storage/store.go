@@ -25,7 +25,11 @@ type Store interface {
 	GetEnrollment(ctx context.Context, id string) (models.Enrollment, error)
 	GetEnrollmentByNodeID(ctx context.Context, nodeID string) (models.Enrollment, error)
 	UpdateEnrollment(ctx context.Context, enrollment models.Enrollment) error
+	GetActiveHome(ctx context.Context) (string, error)
+	SetActiveHome(ctx context.Context, homeID string) error
 }
+
+const settingActiveHome = "active_home"
 
 type sqliteStore struct {
 	db *sql.DB
@@ -158,6 +162,30 @@ func (s *sqliteStore) CreateOrUpdateProfile(ctx context.Context, profile models.
 	)
 	if err != nil {
 		return fmt.Errorf("insert/update profile: %w", err)
+	}
+	return nil
+}
+
+func (s *sqliteStore) GetActiveHome(ctx context.Context) (string, error) {
+	var value string
+	row := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, settingActiveHome)
+	if err := row.Scan(&value); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil // unset is a normal state
+		}
+		return "", err
+	}
+	return value, nil
+}
+
+func (s *sqliteStore) SetActiveHome(ctx context.Context, homeID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		settingActiveHome, homeID,
+	)
+	if err != nil {
+		return fmt.Errorf("set active home: %w", err)
 	}
 	return nil
 }

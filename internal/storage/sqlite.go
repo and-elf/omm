@@ -86,6 +86,10 @@ func initializeSchema(db *sql.DB) error {
 			mesh_key TEXT,
 			vlans TEXT
 		);`,
+		`CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT
+		);`,
 		`CREATE TABLE IF NOT EXISTS enrollments (
 			id TEXT PRIMARY KEY,
 			node_id TEXT UNIQUE,
