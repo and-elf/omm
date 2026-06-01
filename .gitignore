@@ -11,6 +11,9 @@
 # Test binary, built with `go test -c`
 *.test
 
+# Compiled meshd binary output
+/bin/
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
@@ -26,6 +29,13 @@ go.work.sum
 
 # env file
 .env
+
+# Frontend (PWA) build output and dependencies
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
+/web/coverage/
+*.local
 
 # Editor/IDE
 # .idea/

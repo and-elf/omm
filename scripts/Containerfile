@@ -1,0 +1,12 @@
+FROM golang:1.24-alpine AS build
+
+WORKDIR /src
+RUN apk add --no-cache git
+COPY . .
+RUN go build -o /app/meshd ./meshd/cmd/meshd
+
+FROM alpine:latest
+RUN apk add --no-cache ca-certificates
+COPY --from=build /app/meshd /usr/local/bin/meshd
+EXPOSE 8080/tcp 45678/udp
+ENTRYPOINT ["/usr/local/bin/meshd"]
