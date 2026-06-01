@@ -13,6 +13,7 @@ import (
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/profiles"
 	"github.com/and-elf/omm/internal/storage"
+	"github.com/and-elf/omm/internal/topology"
 	"github.com/and-elf/omm/web"
 )
 
@@ -23,6 +24,7 @@ type apiHandler struct {
 	self           *identity.Identity
 	selfSerial     string
 	selfHomeID     string
+	topology       *topology.Collector
 }
 
 // Option customizes the router/handler.
@@ -47,6 +49,11 @@ func WithSelf(id *identity.Identity, serial string) Option {
 // endpoints to report and name the device's own Home.
 func WithSelfHome(homeID string) Option {
 	return func(h *apiHandler) { h.selfHomeID = homeID }
+}
+
+// WithTopology registers the GET /topology endpoint backed by collector.
+func WithTopology(collector *topology.Collector) Option {
+	return func(h *apiHandler) { h.topology = collector }
 }
 
 type statusResponse struct {
@@ -87,6 +94,10 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 	r.Get("/nodes/{nodeID}", h.getNode)
 	r.Get("/active-home", h.getActiveHome)
 	r.Put("/active-home", h.setActiveHome)
+
+	if h.topology != nil {
+		r.Get("/topology", h.getTopology)
+	}
 
 	if h.enrollment != nil {
 		r.Get("/enroll", h.listEnrollments)

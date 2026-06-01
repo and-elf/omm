@@ -27,6 +27,10 @@ type Config struct {
 	IdentityDir string
 	Serial      string
 	Join        []string // controller URLs to enroll into on boot
+
+	// Topology collection.
+	BatmanIface  string   // batman-adv interface (e.g. bat0)
+	APInterfaces []string // hostapd interfaces to read clients from
 }
 
 func Load() Config {
@@ -47,6 +51,9 @@ func Load() Config {
 		IdentityDir: envOr("MESHD_IDENTITY_DIR", "./meshd-identity"),
 		Serial:      envOr("MESHD_SERIAL", hostnameOr("unknown")),
 		Join:        splitList(os.Getenv("MESHD_JOIN")),
+
+		BatmanIface:  envOr("MESHD_BATMAN_IFACE", "bat0"),
+		APInterfaces: splitList(os.Getenv("MESHD_AP_IFACES")),
 	}
 }
 

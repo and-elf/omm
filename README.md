@@ -578,7 +578,11 @@ Returns:
 meshd.topology
 ```
 
-Returns graph data.
+Returns graph data. The HTTP API exposes this as `GET /topology`, returning the
+node's live view: mesh nodes, batman-adv links with transmit quality (TQ), and
+associated clients with signal (RSSI), band and tx/rx rates. Sources are
+`batctl o` (originators) and hostapd `get_clients` over ubus; the PWA renders it
+with Cytoscape.js.
 
 ---
 

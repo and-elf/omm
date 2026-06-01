@@ -18,6 +18,8 @@ import (
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/profiles"
 	"github.com/and-elf/omm/internal/storage"
+	"github.com/and-elf/omm/internal/topology"
+	"github.com/and-elf/omm/internal/ubus"
 	"github.com/and-elf/omm/internal/uci"
 )
 
@@ -58,10 +60,23 @@ func main() {
 
 	profileManager := profiles.NewManager(store, uciClient)
 	enrollSvc := enrollment.NewService(store, enrollment.Options{HomeID: cfg.HomeID, AutoAdopt: cfg.AutoAdopt})
+
+	// Topology collector: batman-adv link quality + hostapd client RSSI.
+	ubusClient, err := ubus.NewClient(ubus.Options{SocketPath: cfg.UbusSocket, BinaryPath: cfg.UbusBinary})
+	if err != nil {
+		log.Fatalf("failed to create ubus client: %v", err)
+	}
+	defer ubusClient.Close()
+	collector := topology.NewCollector(id.NodeID(), cfg.Serial,
+		topology.BatctlMesh{Interface: cfg.BatmanIface},
+		topology.UbusClients{Ubus: ubusClient, Interfaces: cfg.APInterfaces},
+	)
+
 	router := api.NewRouter(store, profileManager,
 		api.WithEnrollment(enrollSvc),
 		api.WithSelf(id, cfg.Serial),
 		api.WithSelfHome(cfg.HomeID),
+		api.WithTopology(collector),
 	)
 
 	// Announce this controller's presence for discovery.
