@@ -59,7 +59,7 @@ var targets = []target{
 	{
 		name:     "apk-24.10",
 		image:    "docker.io/openwrt/rootfs:x86_64-24.10.7",
-		pkgRel:   "build/meshd-0.1.0.apk",
+		pkgRel:   "build/meshd-0.1.0-x86_64.apk",
 		destPath: "/tmp/meshd.apk",
 		// The repo's .apk is a plain gzip tar (not a signed apk package), so we
 		// install it by extracting onto the real 24.10 userland.
