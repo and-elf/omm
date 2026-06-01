@@ -115,10 +115,14 @@ choice (`internal/homeselect`) follows this precedence:
    - ties and never-used Homes are broken by **strongest signal (RSSI)**.
 
 RSSI is supplied by the same `UbusClients` source used for topology (hostapd
-`get_clients`), keyed by each Home's controller MAC; when a controller is not
-observed its signal is unset and selection falls back to last-active. The
-computed recommendation is exposed at `GET /home-selection` (recommended home,
-the active home, and per-Home signal/last-active/self-controlled).
+`get_clients`), keyed by each Home's controller **BSSID**. A controller
+advertises its mesh BSSID via `MESHD_BSSID` (or it is read from
+`MESHD_MESH_IFACE`) and stores it on its Home; a joining device records that
+BSSID with the Home, so when it observes that peer's signal it maps to the
+right Home. When a controller is not observed its signal is unset and selection
+falls back to last-active. The recommendation is exposed at
+`GET /home-selection` (recommended home, the active home, and per-Home
+signal/last-active/self-controlled) and surfaced in the PWA Settings screen.
 
 ## Node state machine
 

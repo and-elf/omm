@@ -21,9 +21,9 @@ func TestHomeSelectionEndpoint(t *testing.T) {
 	store := storage.NewStore(db)
 	ctx := context.Background()
 	// Self home plus two external homes with controller MACs.
-	_ = store.CreateHome(ctx, models.Home{ID: "self", Name: "Self", Controller: "00:00:00:00:00:01"})
-	_ = store.CreateHome(ctx, models.Home{ID: "cottage", Name: "Cottage", Controller: "aa:bb:cc:dd:ee:01"})
-	_ = store.CreateHome(ctx, models.Home{ID: "parents", Name: "Parents", Controller: "aa:bb:cc:dd:ee:02"})
+	_ = store.CreateHome(ctx, models.Home{ID: "self", Name: "Self", BSSID: "00:00:00:00:00:01"})
+	_ = store.CreateHome(ctx, models.Home{ID: "cottage", Name: "Cottage", BSSID: "aa:bb:cc:dd:ee:01"})
+	_ = store.CreateHome(ctx, models.Home{ID: "parents", Name: "Parents", BSSID: "aa:bb:cc:dd:ee:02"})
 
 	signals := stubSignals{"aa:bb:cc:dd:ee:01": -55, "aa:bb:cc:dd:ee:02": -80}
 	router := NewRouter(store, noopProfileManager{}, WithSelfHome("self"), WithSignalSource(signals))

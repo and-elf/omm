@@ -4,6 +4,7 @@ type Home struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Controller  string `json:"controller"`
+	BSSID       string `json:"bssid"`
 	Certificate []byte `json:"certificate"`
 	LastSeen    int64  `json:"last_seen"`
 }

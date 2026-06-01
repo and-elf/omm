@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -69,6 +70,7 @@ func initializeSchema(db *sql.DB) error {
 			id TEXT PRIMARY KEY,
 			name TEXT,
 			controller TEXT,
+			bssid TEXT,
 			certificate BLOB,
 			last_connected INTEGER
 		);`,
@@ -104,6 +106,16 @@ func initializeSchema(db *sql.DB) error {
 
 	for _, query := range queries {
 		if _, err := db.Exec(query); err != nil {
+			return err
+		}
+	}
+
+	// Migrations for databases created before a column existed. SQLite has no
+	// "ADD COLUMN IF NOT EXISTS", so ignore the duplicate-column error.
+	for _, alter := range []string{
+		`ALTER TABLE homes ADD COLUMN bssid TEXT`,
+	} {
+		if _, err := db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return err
 		}
 	}

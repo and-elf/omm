@@ -13,8 +13,9 @@ import (
 type Signals map[string]int
 
 // Candidates builds homeselect candidates from the Homes this device knows.
-// A Home whose Controller matches an observed peer MAC is annotated with that
-// peer's RSSI; the device's own Home is flagged so it is only a last resort.
+// A Home whose controller BSSID matches an observed peer MAC is annotated with
+// that peer's RSSI; the device's own Home is flagged so it is only a last
+// resort.
 func Candidates(homes []models.Home, selfHomeID string, signals Signals) []homeselect.Candidate {
 	candidates := make([]homeselect.Candidate, 0, len(homes))
 	for _, h := range homes {
@@ -23,7 +24,7 @@ func Candidates(homes []models.Home, selfHomeID string, signals Signals) []homes
 			LastActive:     h.LastSeen,
 			SelfControlled: h.ID == selfHomeID,
 		}
-		if sig, ok := signals[strings.ToLower(h.Controller)]; ok {
+		if sig, ok := signals[strings.ToLower(h.BSSID)]; ok {
 			c.Signal = sig
 		}
 		candidates = append(candidates, c)

@@ -22,6 +22,8 @@ type Config struct {
 	AutoAdopt    bool
 	APIAdvertise string // API URL announced to clients (defaults to HTTPAddr)
 	UDPBroadcast string // broadcast endpoint for announcements
+	BSSID        string // controller mesh BSSID/MAC (explicit)
+	MeshIface    string // interface to read the BSSID from when BSSID is empty
 
 	// Device identity and homes to join at startup.
 	IdentityDir string
@@ -47,6 +49,8 @@ func Load() Config {
 		AutoAdopt:    envBool("MESHD_AUTO_ADOPT"),
 		APIAdvertise: os.Getenv("MESHD_API_ADVERTISE"),
 		UDPBroadcast: envOr("MESHD_UDP_BROADCAST", "255.255.255.255:45678"),
+		BSSID:        os.Getenv("MESHD_BSSID"),
+		MeshIface:    os.Getenv("MESHD_MESH_IFACE"),
 
 		IdentityDir: envOr("MESHD_IDENTITY_DIR", "./meshd-identity"),
 		Serial:      envOr("MESHD_SERIAL", hostnameOr("unknown")),

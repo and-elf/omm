@@ -7,9 +7,9 @@ import (
 )
 
 var homes = []models.Home{
-	{ID: "self", Controller: "00:00:00:00:00:01", LastSeen: 500},
-	{ID: "cottage", Controller: "aa:bb:cc:dd:ee:01", LastSeen: 100},
-	{ID: "parents", Controller: "AA:BB:CC:DD:EE:02", LastSeen: 200},
+	{ID: "self", BSSID: "00:00:00:00:00:01", LastSeen: 500},
+	{ID: "cottage", BSSID: "aa:bb:cc:dd:ee:01", LastSeen: 100},
+	{ID: "parents", BSSID: "AA:BB:CC:DD:EE:02", LastSeen: 200},
 }
 
 func TestCandidatesAnnotatesSignalByControllerMAC(t *testing.T) {
@@ -36,8 +36,8 @@ func TestRecommendPrefersStrongestExternalSignal(t *testing.T) {
 	// No history difference relevant; cottage has the stronger RSSI.
 	signals := Signals{"aa:bb:cc:dd:ee:01": -55, "aa:bb:cc:dd:ee:02": -80}
 	best, ok := Recommend([]models.Home{
-		{ID: "cottage", Controller: "aa:bb:cc:dd:ee:01"},
-		{ID: "parents", Controller: "aa:bb:cc:dd:ee:02"},
+		{ID: "cottage", BSSID: "aa:bb:cc:dd:ee:01"},
+		{ID: "parents", BSSID: "aa:bb:cc:dd:ee:02"},
 	}, "self", "", signals)
 	if !ok || best.HomeID != "cottage" {
 		t.Fatalf("expected cottage (strongest), got %+v ok=%v", best, ok)

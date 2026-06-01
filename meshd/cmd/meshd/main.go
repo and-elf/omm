@@ -4,10 +4,11 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"time"
-
+	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/and-elf/omm/internal/api"
 	"github.com/and-elf/omm/internal/client"
@@ -50,12 +51,20 @@ func main() {
 	}
 	defer uciClient.Close()
 
-	// Ensure this daemon's own Home exists so it can act as its controller.
-	if _, err := store.GetHome(ctx, cfg.HomeID); err == storage.ErrNotFound {
+	// Ensure this daemon's own Home exists (with its mesh BSSID, so peers can
+	// map our RSSI to this Home) without clobbering an onboarding rename.
+	bssid := resolveBSSID(cfg)
+	switch home, err := store.GetHome(ctx, cfg.HomeID); {
+	case err == storage.ErrNotFound:
 		if err := store.CreateHome(ctx, models.Home{
-			ID: cfg.HomeID, Name: cfg.HomeName, Controller: cfg.ControllerID, LastSeen: time.Now().Unix(),
+			ID: cfg.HomeID, Name: cfg.HomeName, Controller: cfg.ControllerID, BSSID: bssid, LastSeen: time.Now().Unix(),
 		}); err != nil {
 			log.Printf("failed to create home: %v", err)
+		}
+	case err == nil && bssid != "" && home.BSSID != bssid:
+		home.BSSID = bssid
+		if err := store.UpdateHome(ctx, home); err != nil {
+			log.Printf("failed to update home bssid: %v", err)
 		}
 	}
 
@@ -125,6 +134,20 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown failed: %v", err)
 	}
+}
+
+// resolveBSSID returns this controller's mesh BSSID: the explicit MESHD_BSSID,
+// or the MAC read from MESHD_MESH_IFACE (/sys/class/net/<iface>/address).
+func resolveBSSID(cfg config.Config) string {
+	if cfg.BSSID != "" {
+		return strings.ToLower(cfg.BSSID)
+	}
+	if cfg.MeshIface != "" {
+		if b, err := os.ReadFile("/sys/class/net/" + cfg.MeshIface + "/address"); err == nil {
+			return strings.ToLower(strings.TrimSpace(string(b)))
+		}
+	}
+	return ""
 }
 
 // autoSelectHome activates a Home on boot when none is explicitly set, using

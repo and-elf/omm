@@ -48,7 +48,7 @@ func NewStore(db *sql.DB) Store {
 }
 
 func (s *sqliteStore) ListHomes(ctx context.Context) ([]models.Home, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, controller, certificate, last_connected FROM homes`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, controller, bssid, certificate, last_connected FROM homes`)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (s *sqliteStore) ListHomes(ctx context.Context) ([]models.Home, error) {
 	var homes []models.Home
 	for rows.Next() {
 		var home models.Home
-		if err := rows.Scan(&home.ID, &home.Name, &home.Controller, &home.Certificate, &home.LastSeen); err != nil {
+		if err := rows.Scan(&home.ID, &home.Name, &home.Controller, &home.BSSID, &home.Certificate, &home.LastSeen); err != nil {
 			return nil, err
 		}
 		homes = append(homes, home)
@@ -68,8 +68,8 @@ func (s *sqliteStore) ListHomes(ctx context.Context) ([]models.Home, error) {
 
 func (s *sqliteStore) GetHome(ctx context.Context, id string) (models.Home, error) {
 	var home models.Home
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, controller, certificate, last_connected FROM homes WHERE id = ?`, id)
-	if err := row.Scan(&home.ID, &home.Name, &home.Controller, &home.Certificate, &home.LastSeen); err != nil {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, controller, bssid, certificate, last_connected FROM homes WHERE id = ?`, id)
+	if err := row.Scan(&home.ID, &home.Name, &home.Controller, &home.BSSID, &home.Certificate, &home.LastSeen); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return models.Home{}, ErrNotFound
 		}
@@ -80,10 +80,11 @@ func (s *sqliteStore) GetHome(ctx context.Context, id string) (models.Home, erro
 
 func (s *sqliteStore) CreateHome(ctx context.Context, home models.Home) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO homes (id, name, controller, certificate, last_connected) VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO homes (id, name, controller, bssid, certificate, last_connected) VALUES (?, ?, ?, ?, ?, ?)`,
 		home.ID,
 		home.Name,
 		home.Controller,
+		home.BSSID,
 		home.Certificate,
 		home.LastSeen,
 	)
@@ -95,9 +96,9 @@ func (s *sqliteStore) CreateHome(ctx context.Context, home models.Home) error {
 
 func (s *sqliteStore) UpsertHome(ctx context.Context, home models.Home) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO homes (id, name, controller, certificate, last_connected) VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT(id) DO UPDATE SET name = excluded.name, controller = excluded.controller, last_connected = excluded.last_connected`,
-		home.ID, home.Name, home.Controller, home.Certificate, home.LastSeen,
+		`INSERT INTO homes (id, name, controller, bssid, certificate, last_connected) VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET name = excluded.name, controller = excluded.controller, bssid = excluded.bssid, last_connected = excluded.last_connected`,
+		home.ID, home.Name, home.Controller, home.BSSID, home.Certificate, home.LastSeen,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert home: %w", err)
@@ -107,8 +108,8 @@ func (s *sqliteStore) UpsertHome(ctx context.Context, home models.Home) error {
 
 func (s *sqliteStore) UpdateHome(ctx context.Context, home models.Home) error {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE homes SET name = ?, controller = ? WHERE id = ?`,
-		home.Name, home.Controller, home.ID,
+		`UPDATE homes SET name = ?, controller = ?, bssid = ? WHERE id = ?`,
+		home.Name, home.Controller, home.BSSID, home.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update home: %w", err)
