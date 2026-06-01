@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,6 +40,59 @@ func TestActiveHomeSetAndGet(t *testing.T) {
 	_ = json.Unmarshal(rw.Body.Bytes(), &got)
 	if got.HomeID != "home-1" {
 		t.Fatalf("expected active home home-1, got %q", got.HomeID)
+	}
+}
+
+// spyProfileManager records ApplyProfileForHome calls so tests can assert that
+// switching the active Home pushes that Home's profile to UCI.
+type spyProfileManager struct {
+	appliedHome string
+	applyCalls  int
+	applyErr    error
+}
+
+func (s *spyProfileManager) ApplyProfile(ctx context.Context, profile models.Profile) error {
+	return nil
+}
+
+func (s *spyProfileManager) ApplyProfileForHome(ctx context.Context, homeID string) error {
+	s.applyCalls++
+	s.appliedHome = homeID
+	return s.applyErr
+}
+
+func TestActiveHomeAppliesProfileOnSwitch(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	store := storage.NewStore(db)
+	if err := store.CreateHome(context.Background(), models.Home{ID: "home-1", Name: "Home"}); err != nil {
+		t.Fatalf("create home: %v", err)
+	}
+	spy := &spyProfileManager{}
+	router := NewRouter(store, spy)
+
+	rw := putJSON(t, router, "/active-home", `{"home_id":"home-1"}`)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("set active home: expected 200, got %d (%s)", rw.Code, rw.Body)
+	}
+	if spy.applyCalls != 1 || spy.appliedHome != "home-1" {
+		t.Fatalf("expected ApplyProfileForHome(home-1) once, got %d call(s) for %q", spy.applyCalls, spy.appliedHome)
+	}
+}
+
+func TestActiveHomeApplyFailureReturns500(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	store := storage.NewStore(db)
+	if err := store.CreateHome(context.Background(), models.Home{ID: "home-1", Name: "Home"}); err != nil {
+		t.Fatalf("create home: %v", err)
+	}
+	spy := &spyProfileManager{applyErr: errors.New("uci boom")}
+	router := NewRouter(store, spy)
+
+	rw := putJSON(t, router, "/active-home", `{"home_id":"home-1"}`)
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when apply fails, got %d (%s)", rw.Code, rw.Body)
 	}
 }
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
@@ -44,5 +45,16 @@ func (h *apiHandler) setActiveHome(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err)
 		return
 	}
+
+	// Selecting a Home is only meaningful if its profile is pushed to UCI —
+	// this is what lets a portable node move between Homes without a factory
+	// reset (see doc/profiles.md "Profile Switching").
+	if h.profileManager != nil {
+		if err := h.profileManager.ApplyProfileForHome(r.Context(), req.HomeID); err != nil {
+			respondError(w, http.StatusInternalServerError, fmt.Errorf("apply profile: %w", err))
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, activeHomeResponse{HomeID: req.HomeID})
 }
