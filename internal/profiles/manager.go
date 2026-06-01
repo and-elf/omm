@@ -50,6 +50,12 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 		return fmt.Errorf("commit system: %w", err)
 	}
 
+	// Commits only stage the config files; reload netifd so the new mesh
+	// settings actually take effect on the running system.
+	if err := m.uciClient.Reload(ctx); err != nil {
+		return fmt.Errorf("reload config: %w", err)
+	}
+
 	return nil
 }
 

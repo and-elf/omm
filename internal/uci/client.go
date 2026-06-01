@@ -17,6 +17,10 @@ type Client interface {
 	Get(ctx context.Context, packageName, section, option string) (string, error)
 	Set(ctx context.Context, packageName, section, option, value string) error
 	Commit(ctx context.Context, packageName string) error
+	// Reload applies committed configuration to the running system. A bare
+	// `uci commit` only rewrites the config files; netifd has to be told to
+	// reconfigure before the changes take effect.
+	Reload(ctx context.Context) error
 	Close() error
 }
 
@@ -81,4 +85,17 @@ func (c *client) Commit(ctx context.Context, packageName string) error {
 		"config": packageName,
 	}
 	return c.ubusClient.Call(ctx, "uci", "commit", params, nil)
+}
+
+// Reload re-applies committed config to the running system: netifd reloads the
+// network interfaces and reconfigures the radios. Both calls return as soon as
+// netifd has accepted the request; the reconfiguration itself is asynchronous.
+func (c *client) Reload(ctx context.Context) error {
+	if err := c.ubusClient.Call(ctx, "network", "reload", nil, nil); err != nil {
+		return fmt.Errorf("reload network: %w", err)
+	}
+	if err := c.ubusClient.Call(ctx, "network.wireless", "reconf", nil, nil); err != nil {
+		return fmt.Errorf("reconf wireless: %w", err)
+	}
+	return nil
 }

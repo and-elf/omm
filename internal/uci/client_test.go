@@ -7,10 +7,16 @@ import (
 	"testing"
 )
 
+type ubusCall struct {
+	object string
+	method string
+}
+
 type fakeUbusClient struct {
 	lastObject string
 	lastMethod string
 	lastParams interface{}
+	calls      []ubusCall
 	response   interface{}
 	err        error
 }
@@ -19,6 +25,7 @@ func (f *fakeUbusClient) Call(ctx context.Context, object, method string, params
 	f.lastObject = object
 	f.lastMethod = method
 	f.lastParams = params
+	f.calls = append(f.calls, ubusCall{object: object, method: method})
 	if f.err != nil {
 		return f.err
 	}
@@ -94,5 +101,22 @@ func TestCommit(t *testing.T) {
 	}
 	if !reflect.DeepEqual(fake.lastParams, map[string]string{"config": "wireless"}) {
 		t.Fatalf("unexpected params: %#v", fake.lastParams)
+	}
+}
+
+func TestReload(t *testing.T) {
+	fake := &fakeUbusClient{}
+	client := &client{ubusClient: fake}
+
+	if err := client.Reload(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := []ubusCall{
+		{object: "network", method: "reload"},
+		{object: "network.wireless", method: "reconf"},
+	}
+	if !reflect.DeepEqual(fake.calls, want) {
+		t.Fatalf("expected network reload then wireless reconf, got %#v", fake.calls)
 	}
 }
