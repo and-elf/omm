@@ -136,6 +136,38 @@ func TestManualAdopt(t *testing.T) {
 	}
 }
 
+func TestListPendingAndReject(t *testing.T) {
+	store := newStore(t)
+	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AutoAdopt: false})
+
+	// Two devices verify (pending approval), one rejected.
+	idA, _ := identity.Generate()
+	idB, _ := identity.Generate()
+	enroll(t, svc, idA, "SN-A")
+	enroll(t, svc, idB, "SN-B")
+
+	pending, err := svc.ListPending(context.Background())
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("expected 2 pending, got %d", len(pending))
+	}
+
+	if _, err := svc.Reject(context.Background(), idB.NodeID()); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+	pending, _ = svc.ListPending(context.Background())
+	if len(pending) != 1 || pending[0].NodeID != idA.NodeID() {
+		t.Fatalf("expected only A pending, got %+v", pending)
+	}
+
+	// A rejected device must not be adoptable.
+	if _, err := svc.Adopt(context.Background(), idB.NodeID()); err == nil {
+		t.Fatal("expected rejected enrollment to be non-adoptable")
+	}
+}
+
 func TestConcurrentEnrollments(t *testing.T) {
 	store := newStore(t)
 	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AutoAdopt: true})

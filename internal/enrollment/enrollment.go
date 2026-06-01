@@ -38,6 +38,7 @@ type Repository interface {
 	CreateEnrollment(ctx context.Context, e models.Enrollment) error
 	GetEnrollment(ctx context.Context, id string) (models.Enrollment, error)
 	GetEnrollmentByNodeID(ctx context.Context, nodeID string) (models.Enrollment, error)
+	ListEnrollments(ctx context.Context, status models.EnrollmentStatus) ([]models.Enrollment, error)
 	UpdateEnrollment(ctx context.Context, e models.Enrollment) error
 	CreateNode(ctx context.Context, node models.Node) error
 	GetNode(ctx context.Context, id string) (models.Node, error)
@@ -178,6 +179,29 @@ func (s *Service) Adopt(ctx context.Context, nodeID string) (Result, error) {
 		return Result{}, ErrNotAdoptable
 	}
 	return s.approve(ctx, e)
+}
+
+// ListPending returns enrollments awaiting controller approval.
+func (s *Service) ListPending(ctx context.Context) ([]models.Enrollment, error) {
+	return s.repo.ListEnrollments(ctx, models.EnrollmentPendingApproval)
+}
+
+// List returns enrollments, optionally filtered by status ("" means all).
+func (s *Service) List(ctx context.Context, status models.EnrollmentStatus) ([]models.Enrollment, error) {
+	return s.repo.ListEnrollments(ctx, status)
+}
+
+// Reject marks a pending enrollment as rejected so the node is not adopted.
+func (s *Service) Reject(ctx context.Context, nodeID string) (Result, error) {
+	e, err := s.repo.GetEnrollmentByNodeID(ctx, nodeID)
+	if err != nil {
+		return Result{}, err
+	}
+	e.Status = models.EnrollmentRejected
+	if err := s.repo.UpdateEnrollment(ctx, e); err != nil {
+		return Result{}, err
+	}
+	return s.result(ctx, e), nil
 }
 
 // Get returns the current status (and profile, if available) of an enrollment.

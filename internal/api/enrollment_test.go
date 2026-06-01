@@ -134,6 +134,46 @@ func TestAdoptEndpointManualFlow(t *testing.T) {
 	}
 }
 
+func TestListPendingAndRejectEndpoints(t *testing.T) {
+	router, store := setupEnrollRouter(t, false) // manual approval -> pending
+	id, _ := identity.Generate()
+
+	rw := postJSON(t, router, "/enroll/request", enrollment.RequestInput{
+		NodeID: id.NodeID(), Serial: "SN1", PublicKey: id.PublicKeyDER(),
+	})
+	var reqRes enrollment.RequestResult
+	_ = json.Unmarshal(rw.Body.Bytes(), &reqRes)
+	sig, _ := id.Sign(reqRes.Challenge)
+	postJSON(t, router, "/enroll/verify", enrollment.VerifyInput{EnrollmentID: reqRes.EnrollmentID, Signature: sig})
+
+	// GET /enroll lists the pending device.
+	req := httptest.NewRequest(http.MethodGet, "/enroll", nil)
+	rw = httptest.NewRecorder()
+	router.ServeHTTP(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("list enroll: expected 200, got %d", rw.Code)
+	}
+	var list struct {
+		Enrollments []struct {
+			NodeID string `json:"node_id"`
+			Status string `json:"status"`
+		} `json:"enrollments"`
+	}
+	_ = json.Unmarshal(rw.Body.Bytes(), &list)
+	if len(list.Enrollments) != 1 || list.Enrollments[0].NodeID != id.NodeID() {
+		t.Fatalf("expected one pending enrollment, got %+v", list.Enrollments)
+	}
+
+	// Reject it.
+	rw = postJSON(t, router, "/nodes/"+id.NodeID()+"/reject", nil)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("reject: expected 200, got %d (%s)", rw.Code, rw.Body)
+	}
+	if _, err := store.GetNode(context.Background(), id.NodeID()); err == nil {
+		t.Fatal("rejected device must not be in the node inventory")
+	}
+}
+
 func TestEnrollRoutesAbsentWithoutService(t *testing.T) {
 	db, _ := storage.OpenDB(":memory:")
 	t.Cleanup(func() { db.Close() })

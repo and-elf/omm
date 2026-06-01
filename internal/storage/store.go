@@ -24,6 +24,7 @@ type Store interface {
 	CreateEnrollment(ctx context.Context, enrollment models.Enrollment) error
 	GetEnrollment(ctx context.Context, id string) (models.Enrollment, error)
 	GetEnrollmentByNodeID(ctx context.Context, nodeID string) (models.Enrollment, error)
+	ListEnrollments(ctx context.Context, status models.EnrollmentStatus) ([]models.Enrollment, error)
 	UpdateEnrollment(ctx context.Context, enrollment models.Enrollment) error
 	GetActiveHome(ctx context.Context) (string, error)
 	SetActiveHome(ctx context.Context, homeID string) error
@@ -210,6 +211,32 @@ func (s *sqliteStore) GetEnrollment(ctx context.Context, id string) (models.Enro
 func (s *sqliteStore) GetEnrollmentByNodeID(ctx context.Context, nodeID string) (models.Enrollment, error) {
 	return scanEnrollment(s.db.QueryRowContext(ctx,
 		`SELECT id, node_id, serial, public_key, challenge, status, home_id, created_at FROM enrollments WHERE node_id = ?`, nodeID))
+}
+
+func (s *sqliteStore) ListEnrollments(ctx context.Context, status models.EnrollmentStatus) ([]models.Enrollment, error) {
+	query := `SELECT id, node_id, serial, public_key, challenge, status, home_id, created_at FROM enrollments`
+	var args []any
+	if status != "" {
+		query += ` WHERE status = ?`
+		args = append(args, string(status))
+	}
+	query += ` ORDER BY created_at`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var enrollments []models.Enrollment
+	for rows.Next() {
+		e, err := scanEnrollment(rows)
+		if err != nil {
+			return nil, err
+		}
+		enrollments = append(enrollments, e)
+	}
+	return enrollments, rows.Err()
 }
 
 func (s *sqliteStore) UpdateEnrollment(ctx context.Context, e models.Enrollment) error {

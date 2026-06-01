@@ -9,6 +9,7 @@ import (
 
 	"github.com/and-elf/omm/internal/client"
 	"github.com/and-elf/omm/internal/enrollment"
+	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/storage"
 )
 
@@ -51,6 +52,57 @@ func (h *apiHandler) enrollStatus(w http.ResponseWriter, r *http.Request) {
 
 func (h *apiHandler) enrollAck(w http.ResponseWriter, r *http.Request) {
 	result, err := h.enrollment.Ack(r.Context(), chi.URLParam(r, "enrollmentID"))
+	if err != nil {
+		respondEnrollError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// enrollmentSummary is the list view of an enrollment (no key/challenge).
+type enrollmentSummary struct {
+	ID        string                  `json:"id"`
+	NodeID    string                  `json:"node_id"`
+	Serial    string                  `json:"serial"`
+	Status    models.EnrollmentStatus `json:"status"`
+	HomeID    string                  `json:"home_id"`
+	CreatedAt int64                   `json:"created_at"`
+}
+
+type enrollmentsResponse struct {
+	Enrollments []enrollmentSummary `json:"enrollments"`
+}
+
+// listEnrollments returns enrollments, defaulting to those awaiting approval.
+// An optional ?status= filter (e.g. "" / "all" / a specific status) overrides.
+func (h *apiHandler) listEnrollments(w http.ResponseWriter, r *http.Request) {
+	status := models.EnrollmentPendingApproval
+	switch s := r.URL.Query().Get("status"); s {
+	case "":
+		// default: pending approval
+	case "all":
+		status = ""
+	default:
+		status = models.EnrollmentStatus(s)
+	}
+
+	enrollments, err := h.enrollment.List(r.Context(), status)
+	if err != nil {
+		respondEnrollError(w, err)
+		return
+	}
+	out := make([]enrollmentSummary, 0, len(enrollments))
+	for _, e := range enrollments {
+		out = append(out, enrollmentSummary{
+			ID: e.ID, NodeID: e.NodeID, Serial: e.Serial,
+			Status: e.Status, HomeID: e.HomeID, CreatedAt: e.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, enrollmentsResponse{Enrollments: out})
+}
+
+func (h *apiHandler) rejectNode(w http.ResponseWriter, r *http.Request) {
+	result, err := h.enrollment.Reject(r.Context(), chi.URLParam(r, "nodeID"))
 	if err != nil {
 		respondEnrollError(w, err)
 		return

@@ -79,11 +79,13 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 	r.Put("/active-home", h.setActiveHome)
 
 	if h.enrollment != nil {
+		r.Get("/enroll", h.listEnrollments)
 		r.Post("/enroll/request", h.enrollRequest)
 		r.Post("/enroll/verify", h.enrollVerify)
 		r.Get("/enroll/{enrollmentID}", h.enrollStatus)
 		r.Post("/enroll/{enrollmentID}/ack", h.enrollAck)
 		r.Post("/nodes/{nodeID}/adopt", h.adoptNode)
+		r.Post("/nodes/{nodeID}/reject", h.rejectNode)
 	}
 
 	// A daemon with a device identity can enroll into other controllers as a
