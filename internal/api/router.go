@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -25,6 +26,13 @@ type apiHandler struct {
 	selfSerial     string
 	selfHomeID     string
 	topology       *topology.Collector
+	signals        SignalSource
+}
+
+// SignalSource provides observed peer RSSI (dBm) keyed by lower-case MAC. The
+// topology UbusClients satisfies it, so home selection reuses the same source.
+type SignalSource interface {
+	SignalByMAC(ctx context.Context) (map[string]int, error)
 }
 
 // Option customizes the router/handler.
@@ -54,6 +62,12 @@ func WithSelfHome(homeID string) Option {
 // WithTopology registers the GET /topology endpoint backed by collector.
 func WithTopology(collector *topology.Collector) Option {
 	return func(h *apiHandler) { h.topology = collector }
+}
+
+// WithSignalSource enables the GET /home-selection endpoint, feeding observed
+// RSSI into the home-selection policy.
+func WithSignalSource(src SignalSource) Option {
+	return func(h *apiHandler) { h.signals = src }
 }
 
 type statusResponse struct {
@@ -97,6 +111,9 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 
 	if h.topology != nil {
 		r.Get("/topology", h.getTopology)
+	}
+	if h.signals != nil {
+		r.Get("/home-selection", h.getHomeSelection)
 	}
 
 	if h.enrollment != nil {

@@ -67,9 +67,10 @@ func main() {
 		log.Fatalf("failed to create ubus client: %v", err)
 	}
 	defer ubusClient.Close()
+	wifiClients := topology.UbusClients{Ubus: ubusClient, Interfaces: cfg.APInterfaces}
 	collector := topology.NewCollector(id.NodeID(), cfg.Serial,
 		topology.BatctlMesh{Interface: cfg.BatmanIface},
-		topology.UbusClients{Ubus: ubusClient, Interfaces: cfg.APInterfaces},
+		wifiClients,
 	)
 
 	router := api.NewRouter(store, profileManager,
@@ -77,6 +78,7 @@ func main() {
 		api.WithSelf(id, cfg.Serial),
 		api.WithSelfHome(cfg.HomeID),
 		api.WithTopology(collector),
+		api.WithSignalSource(wifiClients),
 	)
 
 	// Announce this controller's presence for discovery.

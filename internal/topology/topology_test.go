@@ -99,3 +99,17 @@ func TestUbusClientsParsesRSSI(t *testing.T) {
 		t.Fatalf("unexpected client: %+v", c)
 	}
 }
+
+func TestSignalByMAC(t *testing.T) {
+	src := UbusClients{
+		Ubus:       fakeUbus{payload: `{"freq":2412,"clients":{"AA:BB:CC:DD:EE:FF":{"signal":-61}}}`},
+		Interfaces: []string{"wlan0"},
+	}
+	signals, err := src.SignalByMAC(context.Background())
+	if err != nil {
+		t.Fatalf("signal by mac: %v", err)
+	}
+	if signals["aa:bb:cc:dd:ee:ff"] != -61 {
+		t.Fatalf("expected -61 for peer, got %+v", signals)
+	}
+}

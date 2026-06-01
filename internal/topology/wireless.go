@@ -50,6 +50,22 @@ func (u UbusClients) Clients(ctx context.Context) ([]Client, error) {
 	return out, nil
 }
 
+// SignalByMAC returns the observed signal (RSSI, dBm) of associated peers keyed
+// by lower-case MAC. It reuses the same hostapd get_clients read as the
+// topology collector, so mesh peers (including a Home's controller) and their
+// link signal can feed home selection.
+func (u UbusClients) SignalByMAC(ctx context.Context) (map[string]int, error) {
+	clients, err := u.Clients(ctx)
+	if err != nil {
+		return nil, err
+	}
+	signals := make(map[string]int, len(clients))
+	for _, c := range clients {
+		signals[c.MAC] = c.Signal
+	}
+	return signals, nil
+}
+
 // bandFromFreq maps a center frequency (MHz) to a human band label.
 func bandFromFreq(freq int) string {
 	switch {
