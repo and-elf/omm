@@ -47,6 +47,13 @@ export default defineConfig({
   // Hash-based routing means the backend only ever serves index.html and
   // assets, so the app is built with relative asset paths.
   base: './',
+  build: {
+    // Keep the committed dist/.gitkeep placeholder (which lets //go:embed
+    // all:dist compile without a frontend build) rather than wiping it on each
+    // build. A fresh checkout's dist only contains the placeholder, so nothing
+    // stale is left behind in CI.
+    emptyOutDir: false,
+  },
   server: {
     proxy: Object.fromEntries(
       API_PATHS.map((path) => [path, { target: API_TARGET, changeOrigin: true }]),
