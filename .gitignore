@@ -14,6 +14,9 @@
 # Compiled meshd binary output
 /bin/
 
+# Packaging output (.ipk / .apk)
+/build/
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
