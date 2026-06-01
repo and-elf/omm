@@ -81,13 +81,16 @@ web/
 ## Status
 
 Implemented: first-boot onboarding wizard (Create New Home / Join Existing Home
-/ Advanced) shown until the device is set up, app shell + navigation, API
-client, Dashboard (daemon status + home/node counts), Homes (list, create,
-set-active), Home detail with profile editor, Enrollment (pending-adoption
-approve/reject queue + join-another-home), Nodes list and node detail, a
-Settings screen (device identity, home, active home, re-run setup), and PWA
-manifest + service worker, and a Topology view rendering the live mesh graph
-(batman-adv link quality and client RSSI) with Cytoscape.js.
+/ Advanced) shown until the device is set up, including scan-to-join (pick a
+nearby Home discovered via `GET /scan` instead of typing a controller URL), app
+shell + navigation, API client, Dashboard (daemon status + home/node counts),
+Homes (list, create, set-active), Home detail with profile editor, Enrollment
+(pending-adoption approve/reject queue + join-another-home), Nodes list and node
+detail, a Settings screen (device identity, home, active home, re-run setup),
+PWA manifest + service worker, and a Topology view rendering the mesh graph
+(batman-adv link quality and client RSSI) with Cytoscape.js. Topology is
+aggregated across the mesh — a controller merges its own view with member
+reports — so the graph is no longer limited to each daemon's local view.
 
-Pending: aggregating topology across all nodes (the current graph is each
-daemon's local view) and live auto-refresh.
+Pending: live auto-refresh — the Topology view currently updates only via its
+manual *Refresh* button (no background polling yet).

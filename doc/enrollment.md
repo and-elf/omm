@@ -2,8 +2,8 @@
 
 This document specifies the discovery + enrollment flow between an unclaimed
 **node** and a **controller**, implementing the state machine and sequence
-described in the [README](../README.md). It is the contract exercised by the
-container-based end-to-end tests.
+described in [Discovery & Enrollment](discovery-enrollment.md). It is the
+contract exercised by the container-based end-to-end tests.
 
 ## Roles are not a startup mode
 
