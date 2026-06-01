@@ -7,6 +7,7 @@ import type {
   Profile,
   Setup,
   Status,
+  Topology,
 } from '@/types'
 
 /** Error thrown for non-2xx API responses, carrying the HTTP status code. */
@@ -58,6 +59,10 @@ export class ApiClient {
 
   getStatus(): Promise<Status> {
     return this.request<Status>('/status')
+  }
+
+  getTopology(): Promise<Topology> {
+    return this.request<Topology>('/topology')
   }
 
   async listHomes(): Promise<Home[]> {

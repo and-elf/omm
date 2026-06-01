@@ -62,3 +62,30 @@ export interface EnrollmentResult {
   status: EnrollmentStatus
   profile?: Profile
 }
+
+export interface TopologyNode {
+  id: string
+  label: string
+  role: string
+}
+
+export interface TopologyLink {
+  source: string
+  target: string
+  tq: number
+}
+
+export interface TopologyClient {
+  mac: string
+  ap: string
+  signal: number
+  band?: string
+  tx_rate?: number
+  rx_rate?: number
+}
+
+export interface Topology {
+  nodes: TopologyNode[] | null
+  links: TopologyLink[] | null
+  clients: TopologyClient[] | null
+}
