@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -61,6 +62,40 @@ type Client struct {
 // callers (such as the /enroll/join endpoint) that enroll on demand.
 func Join(ctx context.Context, id *identity.Identity, controllerURL, serial string, opts Options) (enrollment.Result, error) {
 	return New(id, controllerURL, opts).Enroll(ctx, serial)
+}
+
+// HomeRecorder persists a Home this device has become a member of, so boot
+// home-selection can consider it. storage.Store satisfies it.
+type HomeRecorder interface {
+	UpsertHome(ctx context.Context, home models.Home) error
+}
+
+// JoinAndRecord enrolls into a controller and records the joined Home locally
+// as a membership (id, name, controller), stamped with the join time. This is
+// what lets a multi-home device choose between Homes on boot.
+func JoinAndRecord(ctx context.Context, id *identity.Identity, controllerURL, serial string, recorder HomeRecorder, opts Options) (enrollment.Result, error) {
+	c := New(id, controllerURL, opts)
+	result, err := c.Enroll(ctx, serial)
+	if err != nil {
+		return result, err
+	}
+	if recorder != nil && result.HomeID != "" {
+		if home, herr := c.RemoteHome(ctx, result.HomeID); herr == nil {
+			if home.ID == "" {
+				home.ID = result.HomeID
+			}
+			home.LastSeen = time.Now().Unix()
+			_ = recorder.UpsertHome(ctx, home)
+		}
+	}
+	return result, nil
+}
+
+// RemoteHome fetches a Home's metadata from the controller.
+func (c *Client) RemoteHome(ctx context.Context, homeID string) (models.Home, error) {
+	var home models.Home
+	err := c.get(ctx, "/homes/"+url.PathEscape(homeID), &home)
+	return home, err
 }
 
 // New creates a client for the given identity targeting controllerURL.

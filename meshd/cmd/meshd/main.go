@@ -102,14 +102,20 @@ func main() {
 		}
 	}()
 
-	// If no Home is active yet, pick one (last-active / strongest RSSI, with the
-	// device's own Home as a last resort) and apply it.
-	go autoSelectHome(ctx, store, profileManager, wifiClients, cfg.HomeID)
+	// Pick and apply a Home when none is active yet. autoSelectHome is
+	// idempotent (it respects an already-set active Home), so it is safe to run
+	// again after each join lands.
+	autoSelect := func() { autoSelectHome(ctx, store, profileManager, wifiClients, cfg.HomeID) }
 
-	// Optionally enroll into other homes at startup (membership; a device is
-	// only ever active in one home at a time).
-	for _, controllerURL := range cfg.Join {
-		go joinHome(ctx, id, cfg.Serial, controllerURL, profileManager)
+	if len(cfg.Join) == 0 {
+		// No joins configured: select from the Homes already known.
+		go autoSelect()
+	} else {
+		// Joining devices: wait to record the joined Home(s) before selecting,
+		// so an external Home can win over the device's own (last-resort) Home.
+		for _, controllerURL := range cfg.Join {
+			go joinHome(ctx, id, cfg.Serial, controllerURL, store, profileManager, autoSelect)
+		}
 	}
 
 	<-ctx.Done()
@@ -158,16 +164,19 @@ func autoSelectHome(ctx context.Context, store storage.Store, pm profiles.Profil
 
 // joinHome enrolls this device into another controller, retrying until it
 // succeeds or the daemon stops.
-func joinHome(ctx context.Context, id *identity.Identity, serial, controllerURL string, pm profiles.ProfileManager) {
+func joinHome(ctx context.Context, id *identity.Identity, serial, controllerURL string, store storage.Store, pm profiles.ProfileManager, afterJoin func()) {
 	const retry = 3 * time.Second
 	for {
-		result, err := client.Join(ctx, id, controllerURL, serial, client.Options{})
+		result, err := client.JoinAndRecord(ctx, id, controllerURL, serial, store, client.Options{})
 		if err == nil {
 			log.Printf("joined controller %s status=%s", controllerURL, result.Status)
 			if result.Profile != nil {
 				if err := pm.ApplyProfile(ctx, *result.Profile); err != nil {
 					log.Printf("apply profile from %s failed: %v", controllerURL, err)
 				}
+			}
+			if afterJoin != nil {
+				afterJoin()
 			}
 			return
 		}

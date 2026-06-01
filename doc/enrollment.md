@@ -32,6 +32,10 @@ POST /enroll/join { "controller_url": "http://other:8080", "serial": "..." }
 
 The daemon runs the request → verify → approve → ack exchange below against the
 target controller, using its own device identity, and returns the final result.
+On success it records the joined Home locally (id, name, controller) as a
+membership, so subsequent boot selection can choose it. A device configured to
+join Homes at startup (`MESHD_JOIN`) defers its boot auto-select until a join
+has been recorded, so an external Home can win over its own (last-resort) Home.
 
 ## Discovery
 

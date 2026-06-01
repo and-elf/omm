@@ -143,7 +143,7 @@ func (h *apiHandler) enrollJoin(w http.ResponseWriter, r *http.Request) {
 		serial = h.selfSerial
 	}
 
-	result, err := client.Join(r.Context(), h.self, in.ControllerURL, serial, client.Options{})
+	result, err := client.JoinAndRecord(r.Context(), h.self, in.ControllerURL, serial, h.store, client.Options{})
 	if err != nil {
 		respondError(w, http.StatusBadGateway, err)
 		return

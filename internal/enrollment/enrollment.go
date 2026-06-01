@@ -96,6 +96,7 @@ type VerifyInput struct {
 // Result is the status (and profile, once approved) of an enrollment.
 type Result struct {
 	Status  models.EnrollmentStatus `json:"status"`
+	HomeID  string                  `json:"home_id,omitempty"`
 	Profile *models.Profile         `json:"profile,omitempty"`
 }
 
@@ -255,7 +256,7 @@ func (s *Service) approve(ctx context.Context, e models.Enrollment) (Result, err
 // result builds the API result for an enrollment, attaching the Home's profile
 // once the node is approved or active.
 func (s *Service) result(ctx context.Context, e models.Enrollment) Result {
-	res := Result{Status: e.Status}
+	res := Result{Status: e.Status, HomeID: e.HomeID}
 	if e.Status == models.EnrollmentApproved || e.Status == models.EnrollmentActive {
 		if profile, err := s.repo.GetProfile(ctx, e.HomeID); err == nil {
 			res.Profile = &profile

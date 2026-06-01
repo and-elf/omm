@@ -17,6 +17,7 @@ type Store interface {
 	GetHome(ctx context.Context, id string) (models.Home, error)
 	CreateHome(ctx context.Context, home models.Home) error
 	UpdateHome(ctx context.Context, home models.Home) error
+	UpsertHome(ctx context.Context, home models.Home) error
 	ListNodes(ctx context.Context) ([]models.Node, error)
 	GetNode(ctx context.Context, id string) (models.Node, error)
 	CreateNode(ctx context.Context, node models.Node) error
@@ -88,6 +89,18 @@ func (s *sqliteStore) CreateHome(ctx context.Context, home models.Home) error {
 	)
 	if err != nil {
 		return fmt.Errorf("insert home: %w", err)
+	}
+	return nil
+}
+
+func (s *sqliteStore) UpsertHome(ctx context.Context, home models.Home) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO homes (id, name, controller, certificate, last_connected) VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET name = excluded.name, controller = excluded.controller, last_connected = excluded.last_connected`,
+		home.ID, home.Name, home.Controller, home.Certificate, home.LastSeen,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert home: %w", err)
 	}
 	return nil
 }

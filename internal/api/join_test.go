@@ -22,6 +22,9 @@ func TestJoinEndpointEnrollsIntoAnotherController(t *testing.T) {
 	cdb, _ := storage.OpenDB(":memory:")
 	t.Cleanup(func() { cdb.Close() })
 	cstore := storage.NewStore(cdb)
+	if err := cstore.CreateHome(context.Background(), models.Home{ID: "home-controller", Name: "Controller Home", Controller: "ctrl-mac"}); err != nil {
+		t.Fatalf("seed controller home: %v", err)
+	}
 	csvc := enrollment.NewService(cstore, enrollment.Options{HomeID: "home-controller", AutoAdopt: true})
 	controllerSrv := httptest.NewServer(NewRouter(cstore, noopProfileManager{}, WithEnrollment(csvc)))
 	t.Cleanup(controllerSrv.Close)
@@ -49,9 +52,15 @@ func TestJoinEndpointEnrollsIntoAnotherController(t *testing.T) {
 	if _, err := cstore.GetNode(context.Background(), id.NodeID()); err != nil {
 		t.Fatalf("device should be a node in the controller home: %v", err)
 	}
-	// ...while still hosting its own Home (controller capability intact).
-	if _, err := dstore.GetHome(context.Background(), "home-device"); err == nil {
-		t.Log("device retains its own home")
+
+	// ...and has recorded the joined Home locally as a membership, so boot
+	// selection can later consider it.
+	joined, err := dstore.GetHome(context.Background(), "home-controller")
+	if err != nil {
+		t.Fatalf("joined home should be recorded locally: %v", err)
+	}
+	if joined.ID != "home-controller" {
+		t.Fatalf("unexpected recorded home: %+v", joined)
 	}
 }
 
