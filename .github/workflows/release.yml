@@ -129,14 +129,23 @@ jobs:
           pattern: packages-*
           path: dist
           merge-multiple: true
-      - name: Create release
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           assets=$(find dist -type f \( -name '*.ipk' -o -name '*.apk' \))
           echo "Attaching:"; echo "$assets"
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            $assets
+          # Idempotent: re-running the workflow (or re-pushing the tag) must not
+          # fail just because a release for this tag already exists. Create it
+          # if missing, otherwise refresh its assets in place (--clobber
+          # overwrites same-named files from a previous run).
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} exists; uploading assets"
+            gh release upload "${GITHUB_REF_NAME}" --clobber $assets
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes \
+              $assets
+          fi
