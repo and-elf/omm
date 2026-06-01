@@ -1,0 +1,31 @@
+{
+	"luci-app-meshd": {
+		"description": "Grant access to the meshd management object",
+		"read": {
+			"ubus": {
+				"meshd": [
+					"status",
+					"setup",
+					"homes",
+					"nodes",
+					"topology",
+					"home_selection",
+					"scan",
+					"active_home"
+				]
+			}
+		},
+		"write": {
+			"ubus": {
+				"meshd": [
+					"set_active_home",
+					"create_home",
+					"delete_home",
+					"delete_node",
+					"complete_setup",
+					"reset"
+				]
+			}
+		}
+	}
+}

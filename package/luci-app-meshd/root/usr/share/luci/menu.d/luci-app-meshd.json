@@ -1,0 +1,15 @@
+{
+	"admin/network/meshd": {
+		"title": "Mesh Manager",
+		"order": 60,
+		"action": {
+			"type": "view",
+			"path": "meshd/meshd"
+		},
+		"depends": {
+			"acl": [
+				"luci-app-meshd"
+			]
+		}
+	}
+}

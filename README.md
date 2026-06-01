@@ -110,6 +110,7 @@ Build the single-binary product (frontend + daemon) locally with
 | [Topology](doc/topology.md) | Topology collection, aggregation, visualization, client mapping |
 | [API](doc/api.md) | ubus (`meshd.*`) and REST endpoints |
 | [Security Model](doc/security.md) | mutual TLS, Home-issued certificates, trust model |
+| [OpenWrt Integration & Packaging](doc/openwrt.md) | on-device layout, the LuCI app, the auth model, packaging |
 | [Roadmap](doc/roadmap.md) | Planned features not yet implemented |
 | [Go Implementation Appendix](doc/implementation.md) | Implementation guidance for the Go codebase |
 | [PWA (`web/README.md`)](web/README.md) | Frontend stack, serving model, development, current status |

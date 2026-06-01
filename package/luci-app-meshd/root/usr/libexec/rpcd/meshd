@@ -1,0 +1,70 @@
+#!/bin/sh
+# rpcd exec plugin: exposes meshd's local management API as the `meshd` ubus
+# object. rpcd registers this object and gates it with the ACL in
+# /usr/share/rpcd/acl.d/luci-app-meshd.json, so LuCI's session authenticates
+# every call — meshd itself stays unauthenticated behind localhost.
+#
+# Contract (OpenWrt rpcd exec protocol):
+#   <plugin> list            -> JSON of {method: {arg: sample}}
+#   <plugin> call <method>   -> request object on stdin, result JSON on stdout
+#
+# meshd's HTTP API base is taken from $MESHD_URL (default localhost) so the
+# plugin can be pointed at a stub server under test.
+
+MESHD_URL="${MESHD_URL:-http://127.0.0.1:8080}"
+
+# get/send proxy to meshd. send forwards stdin as the JSON request body.
+get() { curl -fsS "$MESHD_URL$1"; }
+send() { curl -fsS -X "$1" -H 'Content-Type: application/json' --data-binary @- "$MESHD_URL$2"; }
+
+# json_str extracts a flat string field from the JSON on stdin. Deliberately
+# avoids jshn so the plugin is portable and testable off-OpenWrt; meshd only
+# passes simple {"home_id": "..."} style argument objects here.
+json_str() {
+	sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
+case "$1" in
+list)
+	cat <<-'EOF'
+		{
+		  "status": {}, "setup": {}, "homes": {}, "nodes": {},
+		  "topology": {}, "home_selection": {}, "scan": {}, "active_home": {},
+		  "set_active_home": { "home_id": "" },
+		  "create_home": { "id": "", "name": "" },
+		  "delete_home": { "home_id": "" },
+		  "delete_node": { "node_id": "" },
+		  "complete_setup": { "home_id": "", "home_name": "" },
+		  "reset": {}
+		}
+	EOF
+	;;
+call)
+	case "$2" in
+	status)         get /status ;;
+	setup)          get /setup ;;
+	homes)          get /homes ;;
+	nodes)          get /nodes ;;
+	topology)       get /topology ;;
+	home_selection) get /home-selection ;;
+	scan)           get /scan ;;
+	active_home)    get /active-home ;;
+	set_active_home) send PUT /active-home ;;
+	create_home)     send POST /homes ;;
+	complete_setup)  send POST /setup/complete ;;
+	delete_home)
+		id="$(json_str home_id)"
+		printf '' | send DELETE "/homes/$id"
+		;;
+	delete_node)
+		id="$(json_str node_id)"
+		printf '' | send DELETE "/nodes/$id"
+		;;
+	reset)          printf '' | send POST /reset ;;
+	*)
+		echo '{"error":"unknown method"}'
+		exit 1
+		;;
+	esac
+	;;
+esac
