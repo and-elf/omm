@@ -26,6 +26,7 @@ type apiHandler struct {
 	selfSerial     string
 	selfHomeID     string
 	topology       *topology.Collector
+	topoAgg        *topology.Aggregator
 	signals        SignalSource
 }
 
@@ -59,9 +60,14 @@ func WithSelfHome(homeID string) Option {
 	return func(h *apiHandler) { h.selfHomeID = homeID }
 }
 
-// WithTopology registers the GET /topology endpoint backed by collector.
+// WithTopology registers the topology endpoints backed by collector: GET
+// /topology serves this node's local view merged with reports from member
+// nodes, and POST /topology/report ingests those reports.
 func WithTopology(collector *topology.Collector) Option {
-	return func(h *apiHandler) { h.topology = collector }
+	return func(h *apiHandler) {
+		h.topology = collector
+		h.topoAgg = topology.NewAggregator(90*time.Second, nil)
+	}
 }
 
 // WithSignalSource enables the GET /home-selection endpoint, feeding observed
@@ -111,6 +117,7 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 
 	if h.topology != nil {
 		r.Get("/topology", h.getTopology)
+		r.Post("/topology/report", h.reportTopology)
 	}
 	if h.signals != nil {
 		r.Get("/home-selection", h.getHomeSelection)

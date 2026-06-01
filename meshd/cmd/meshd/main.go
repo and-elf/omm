@@ -125,6 +125,9 @@ func main() {
 		for _, controllerURL := range cfg.Join {
 			go joinHome(ctx, id, cfg.Serial, controllerURL, store, profileManager, autoSelect)
 		}
+		// Push this node's local topology to its controllers for mesh-wide
+		// aggregation.
+		go reportTopologyLoop(ctx, collector, id.NodeID(), cfg.Join, 15*time.Second)
 	}
 
 	<-ctx.Done()
@@ -182,6 +185,28 @@ func autoSelectHome(ctx context.Context, store storage.Store, pm profiles.Profil
 
 	if err := pm.ApplyProfileForHome(ctx, best.HomeID); err != nil {
 		log.Printf("auto-select: apply profile for %s failed (non-fatal): %v", best.HomeID, err)
+	}
+}
+
+// reportTopologyLoop periodically pushes this node's local topology to its
+// controllers so they can build a mesh-wide view.
+func reportTopologyLoop(ctx context.Context, collector *topology.Collector, nodeID string, controllers []string, interval time.Duration) {
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		graph := collector.Collect(ctx)
+		for _, controllerURL := range controllers {
+			if err := client.ReportTopology(ctx, controllerURL, nodeID, graph, httpClient); err != nil {
+				log.Printf("topology report to %s failed: %v", controllerURL, err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }
 

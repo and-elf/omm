@@ -20,6 +20,7 @@ import (
 	"github.com/and-elf/omm/internal/enrollment"
 	"github.com/and-elf/omm/internal/identity"
 	"github.com/and-elf/omm/internal/models"
+	"github.com/and-elf/omm/internal/topology"
 )
 
 // State is a node lifecycle state.
@@ -89,6 +90,36 @@ func JoinAndRecord(ctx context.Context, id *identity.Identity, controllerURL, se
 		}
 	}
 	return result, nil
+}
+
+// ReportTopology pushes a node's local topology graph to a controller for
+// mesh-wide aggregation (POST /topology/report).
+func ReportTopology(ctx context.Context, controllerURL, nodeID string, graph topology.Graph, httpClient *http.Client) error {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	body, err := json.Marshal(struct {
+		NodeID string         `json:"node_id"`
+		Graph  topology.Graph `json:"graph"`
+	}{NodeID: nodeID, Graph: graph})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(controllerURL, "/")+"/topology/report", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("topology report: status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // RemoteHome fetches a Home's metadata from the controller.

@@ -578,11 +578,16 @@ Returns:
 meshd.topology
 ```
 
-Returns graph data. The HTTP API exposes this as `GET /topology`, returning the
-node's live view: mesh nodes, batman-adv links with transmit quality (TQ), and
-associated clients with signal (RSSI), band and tx/rx rates. Sources are
-`batctl o` (originators) and hostapd `get_clients` over ubus; the PWA renders it
-with Cytoscape.js.
+Returns graph data. The HTTP API exposes this as `GET /topology`: mesh nodes,
+batman-adv links with transmit quality (TQ), and associated clients with signal
+(RSSI), band and tx/rx rates. Sources are `batctl o` (originators) and hostapd
+`get_clients` over ubus; the PWA renders it with Cytoscape.js.
+
+Topology is aggregated across the mesh: each node periodically pushes its local
+view to the controllers it has joined (`POST /topology/report`), and a
+controller's `GET /topology` merges its own view with fresh member reports
+(deduplicating nodes/links/clients, keeping the strongest TQ per link). A leaf
+node's `GET /topology` shows just its local view.
 
 ---
 
