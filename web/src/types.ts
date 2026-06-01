@@ -27,3 +27,30 @@ export interface Profile {
 export interface Status {
   status: string
 }
+
+export interface ActiveHome {
+  home_id: string
+}
+
+export type EnrollmentStatus =
+  | 'pending_verification'
+  | 'pending_approval'
+  | 'approved'
+  | 'active'
+  | 'rejected'
+
+/** Summary of a pending enrollment, as returned by GET /enroll. */
+export interface Enrollment {
+  id: string
+  node_id: string
+  serial: string
+  status: EnrollmentStatus
+  home_id: string
+  created_at: number
+}
+
+/** Result of an enrollment action (verify/adopt/reject/join). */
+export interface EnrollmentResult {
+  status: EnrollmentStatus
+  profile?: Profile
+}

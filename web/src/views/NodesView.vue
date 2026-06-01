@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 
+import { RouterLink } from 'vue-router'
+
 import { api, ApiClient } from '@/api/client'
 import AsyncSection from '@/components/AsyncSection.vue'
 import { useAsync } from '@/composables/useAsync'
@@ -39,7 +41,7 @@ onMounted(run)
         </thead>
         <tbody>
           <tr v-for="node in nodes" :key="node.id" data-test="node-row">
-            <td>{{ node.serial }}</td>
+            <td><RouterLink :to="`/nodes/${node.id}`">{{ node.serial }}</RouterLink></td>
             <td>{{ node.current_home || '—' }}</td>
             <td>{{ (node.trusted_homes ?? []).length }}</td>
             <td>{{ formatLastSeen(node.last_seen) }}</td>

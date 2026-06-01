@@ -6,7 +6,10 @@ import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-rou
 const routes: RouteRecordRaw[] = [
   { path: '/', name: 'dashboard', component: () => import('@/views/DashboardView.vue') },
   { path: '/homes', name: 'homes', component: () => import('@/views/HomesView.vue') },
+  { path: '/homes/:id', name: 'home-detail', component: () => import('@/views/HomeDetailView.vue') },
+  { path: '/enroll', name: 'enroll', component: () => import('@/views/EnrollView.vue') },
   { path: '/nodes', name: 'nodes', component: () => import('@/views/NodesView.vue') },
+  { path: '/nodes/:id', name: 'node-detail', component: () => import('@/views/NodeDetailView.vue') },
   { path: '/topology', name: 'topology', component: () => import('@/views/TopologyView.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]

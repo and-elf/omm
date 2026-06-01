@@ -4,6 +4,7 @@ import { RouterLink, RouterView } from 'vue-router'
 const links = [
   { to: '/', label: 'Dashboard' },
   { to: '/homes', label: 'Homes' },
+  { to: '/enroll', label: 'Enroll' },
   { to: '/nodes', label: 'Nodes' },
   { to: '/topology', label: 'Topology' },
 ]

@@ -1,4 +1,12 @@
-import type { Home, Node, Profile, Status } from '@/types'
+import type {
+  ActiveHome,
+  Enrollment,
+  EnrollmentResult,
+  Home,
+  Node,
+  Profile,
+  Status,
+} from '@/types'
 
 /** Error thrown for non-2xx API responses, carrying the HTTP status code. */
 export class ApiError extends Error {
@@ -68,8 +76,63 @@ export class ApiClient {
     return nodes ?? []
   }
 
-  getProfile(homeId: string): Promise<{ profile: Profile }> {
-    return this.request<{ profile: Profile }>(`/homes/${encodeURIComponent(homeId)}/profile`)
+  getHome(homeId: string): Promise<Home> {
+    return this.request<Home>(`/homes/${encodeURIComponent(homeId)}`)
+  }
+
+  getNode(nodeId: string): Promise<Node> {
+    return this.request<Node>(`/nodes/${encodeURIComponent(nodeId)}`)
+  }
+
+  async getProfile(homeId: string): Promise<Profile> {
+    const { profile } = await this.request<{ profile: Profile }>(
+      `/homes/${encodeURIComponent(homeId)}/profile`,
+    )
+    return profile
+  }
+
+  async saveProfile(homeId: string, profile: Partial<Profile>): Promise<Profile> {
+    const { profile: saved } = await this.request<{ profile: Profile }>(
+      `/homes/${encodeURIComponent(homeId)}/profile`,
+      { method: 'POST', body: JSON.stringify({ ...profile, home_id: homeId }) },
+    )
+    return saved
+  }
+
+  async getActiveHome(): Promise<string> {
+    const { home_id } = await this.request<ActiveHome>('/active-home')
+    return home_id
+  }
+
+  setActiveHome(homeId: string): Promise<ActiveHome> {
+    return this.request<ActiveHome>('/active-home', {
+      method: 'PUT',
+      body: JSON.stringify({ home_id: homeId }),
+    })
+  }
+
+  async listPendingEnrollments(): Promise<Enrollment[]> {
+    const { enrollments } = await this.request<{ enrollments: Enrollment[] | null }>('/enroll')
+    return enrollments ?? []
+  }
+
+  adoptNode(nodeId: string): Promise<EnrollmentResult> {
+    return this.request<EnrollmentResult>(`/nodes/${encodeURIComponent(nodeId)}/adopt`, {
+      method: 'POST',
+    })
+  }
+
+  rejectNode(nodeId: string): Promise<EnrollmentResult> {
+    return this.request<EnrollmentResult>(`/nodes/${encodeURIComponent(nodeId)}/reject`, {
+      method: 'POST',
+    })
+  }
+
+  joinHome(controllerUrl: string, serial?: string): Promise<EnrollmentResult> {
+    return this.request<EnrollmentResult>('/enroll/join', {
+      method: 'POST',
+      body: JSON.stringify({ controller_url: controllerUrl, serial: serial ?? '' }),
+    })
   }
 }
 
