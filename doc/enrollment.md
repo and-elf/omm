@@ -54,7 +54,7 @@ sequenceDiagram
 | Step | Request | Response |
 | ---- | ------- | -------- |
 | request | `{node_id, serial, public_key}` — `public_key` is base64 DER (SPKI) | `{enrollment_id, challenge}` — `challenge` is base64 random nonce (32 bytes) |
-| verify | `{enrollment_id, signature}` — base64 ASN.1 ECDSA signature over the raw challenge bytes | `{status, profile?}` |
+| verify | `{enrollment_id, signature}` — base64 ASN.1 ECDSA signature over the SHA-256 digest of the challenge | `{status, profile?}` |
 | poll | `GET /enroll/{enrollment_id}` | `{status, profile?}` |
 | ack | `POST /enroll/{enrollment_id}/ack` | `{status: "active"}` |
 
