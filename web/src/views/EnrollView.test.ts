@@ -38,18 +38,28 @@ describe('EnrollView', () => {
     expect(wrapper.text().toLowerCase()).toContain('no devices')
   })
 
-  it('joins another home via the form', async () => {
+  it('scans for homes and joins a discovered one', async () => {
     const client = clientWithPending([])
+    vi.spyOn(client, 'scanHomes').mockResolvedValue([
+      { home_id: 'h1', name: 'Cottage', controller_id: 'gw01', api: 'http://other:8080' },
+    ])
     const join = vi.spyOn(client, 'joinHome').mockResolvedValue({ status: 'active' })
 
     const wrapper = mount(EnrollView, { props: { client } })
     await flushPromises()
 
-    await wrapper.find('[data-test="join-form"] input').setValue('http://other:8080')
-    await wrapper.find('[data-test="join-form"]').trigger('submit')
+    // Scan, then join the discovered Home.
+    await wrapper.find('[data-test="join-section"] .btn--primary').trigger('click')
     await flushPromises()
 
-    expect(join).toHaveBeenCalledWith('http://other:8080', undefined)
+    const rows = wrapper.findAll('[data-test="found-row"]')
+    expect(rows).toHaveLength(1)
+    expect(wrapper.text()).toContain('Cottage')
+
+    await rows[0].find('button').trigger('click')
+    await flushPromises()
+
+    expect(join).toHaveBeenCalledWith('http://other:8080')
     expect(wrapper.text()).toContain('status: active')
   })
 })

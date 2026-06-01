@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 
 import { api, ApiClient } from '@/api/client'
 import AsyncSection from '@/components/AsyncSection.vue'
 import { useAsync } from '@/composables/useAsync'
 import { formatLastSeen } from '@/utils/format'
+import type { DiscoveredController } from '@/types'
 
 const props = withDefaults(defineProps<{ client?: ApiClient }>(), {
   client: () => api,
@@ -29,29 +30,43 @@ async function act(fn: () => Promise<unknown>) {
   }
 }
 
-// Join-a-home form: enroll this device into another controller.
-const join = reactive({ url: '', serial: '' })
-const joining = ref(false)
-const joinResult = ref<string | null>(null)
+// Discover nearby Homes to join (instead of typing a URL).
+const found = ref<DiscoveredController[] | null>(null)
+const scanning = ref(false)
+const joiningApi = ref<string | null>(null)
+const joinMessage = ref<string | null>(null)
 const joinError = ref<string | null>(null)
+const showManual = ref(false)
+const manualUrl = ref('')
 
-async function joinHome() {
-  if (!join.url.trim()) {
-    joinError.value = 'Controller URL is required'
-    return
-  }
-  joining.value = true
+async function scan() {
+  scanning.value = true
   joinError.value = null
-  joinResult.value = null
+  joinMessage.value = null
   try {
-    const res = await props.client.joinHome(join.url.trim(), join.serial.trim() || undefined)
-    joinResult.value = `Joined — status: ${res.status}`
-    join.url = ''
-    join.serial = ''
+    found.value = await props.client.scanHomes()
   } catch (err) {
     joinError.value = err instanceof Error ? err.message : String(err)
   } finally {
-    joining.value = false
+    scanning.value = false
+  }
+}
+
+async function join(controllerUrl: string) {
+  if (!controllerUrl.trim()) {
+    joinError.value = 'Controller URL is required'
+    return
+  }
+  joiningApi.value = controllerUrl
+  joinError.value = null
+  joinMessage.value = null
+  try {
+    const res = await props.client.joinHome(controllerUrl.trim())
+    joinMessage.value = `Joined — status: ${res.status}`
+  } catch (err) {
+    joinError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    joiningApi.value = null
   }
 }
 
@@ -96,16 +111,49 @@ onMounted(run)
       </table>
     </AsyncSection>
 
-    <form class="form" data-test="join-form" @submit.prevent="joinHome">
+    <div class="form" data-test="join-section">
       <h3 class="form__title">Join another Home</h3>
-      <p class="form__hint">Enroll this device into another controller (it stays the controller of its own Home).</p>
+      <p class="form__hint">
+        Enrol this device into a nearby controller (it stays the controller of its own Home).
+      </p>
       <div class="form__row">
-        <input v-model="join.url" class="input" placeholder="Controller URL (http://host:8080)" />
-        <input v-model="join.serial" class="input" placeholder="Serial (optional)" />
-        <button class="btn btn--primary" type="submit" :disabled="joining">Join</button>
+        <button class="btn btn--primary" :disabled="scanning" @click="scan">
+          {{ scanning ? 'Scanning…' : 'Scan for Homes' }}
+        </button>
       </div>
-      <p v-if="joinResult" class="form__ok">{{ joinResult }}</p>
+
+      <table v-if="found && found.length" class="table" style="margin-top: 0.75rem">
+        <thead>
+          <tr><th>Home</th><th>Controller</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="c in found" :key="c.home_id" data-test="found-row">
+            <td>{{ c.name || c.home_id }}</td>
+            <td><code>{{ c.controller_id || '—' }}</code></td>
+            <td>
+              <button class="btn btn--small btn--primary" :disabled="joiningApi === c.api" @click="join(c.api)">
+                {{ joiningApi === c.api ? 'Joining…' : 'Join' }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else-if="found && !found.length" class="async__state">
+        No Homes found nearby. Make sure a controller is reachable, or enter its URL manually.
+      </p>
+
+      <p class="form__row" style="margin-top: 0.75rem">
+        <button class="btn btn--small" @click="showManual = !showManual">
+          {{ showManual ? 'Hide manual entry' : 'Enter a URL manually' }}
+        </button>
+      </p>
+      <div v-if="showManual" class="form__row" data-test="manual-join">
+        <input v-model="manualUrl" class="input" placeholder="http://host:8080" />
+        <button class="btn" :disabled="joiningApi === manualUrl" @click="join(manualUrl)">Join</button>
+      </div>
+
+      <p v-if="joinMessage" class="form__ok">{{ joinMessage }}</p>
       <p v-if="joinError" class="form__error" role="alert">{{ joinError }}</p>
-    </form>
+    </div>
   </section>
 </template>

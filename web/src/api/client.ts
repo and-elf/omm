@@ -1,5 +1,6 @@
 import type {
   ActiveHome,
+  DiscoveredController,
   Enrollment,
   EnrollmentResult,
   Home,
@@ -152,6 +153,11 @@ export class ApiClient {
     return this.request<EnrollmentResult>(`/nodes/${encodeURIComponent(nodeId)}/reject`, {
       method: 'POST',
     })
+  }
+
+  async scanHomes(): Promise<DiscoveredController[]> {
+    const { controllers } = await this.request<{ controllers: DiscoveredController[] | null }>('/scan')
+    return controllers ?? []
   }
 
   joinHome(controllerUrl: string, serial?: string): Promise<EnrollmentResult> {

@@ -32,6 +32,14 @@ export interface ActiveHome {
   home_id: string
 }
 
+/** A controller (Home) discovered by scanning. */
+export interface DiscoveredController {
+  home_id: string
+  name: string
+  controller_id: string
+  api: string
+}
+
 export interface Setup {
   setup_complete: boolean
   node_id: string
