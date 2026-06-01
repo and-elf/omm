@@ -13,8 +13,8 @@ controldir="$output/control"
 rm -rf "$output"
 mkdir -p "$pkgdir/usr/bin" "$pkgdir/etc/init.d" "$pkgdir/etc/config" "$pkgdir/etc/meshd" "$controldir"
 install -m 0755 bin/meshd "$pkgdir/usr/bin/meshd"
-install -m 0755 package/meshd.init "$pkgdir/etc/init.d/meshd"
-install -m 0644 package/meshd.config "$pkgdir/etc/config/meshd"
+install -m 0755 package/meshd/files/meshd.init "$pkgdir/etc/init.d/meshd"
+install -m 0644 package/meshd/files/meshd.config "$pkgdir/etc/config/meshd"
 
 cat > "$controldir/control" <<EOF
 Package: $pkgname

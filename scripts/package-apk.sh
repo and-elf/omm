@@ -11,8 +11,8 @@ rootdir="$output/root"
 
 mkdir -p "$rootdir/usr/bin" "$rootdir/etc/init.d" "$rootdir/etc/config" "$rootdir/etc/meshd"
 install -m 0755 bin/meshd "$rootdir/usr/bin/meshd"
-install -m 0755 package/meshd.init "$rootdir/etc/init.d/meshd"
-install -m 0644 package/meshd.config "$rootdir/etc/config/meshd"
+install -m 0755 package/meshd/files/meshd.init "$rootdir/etc/init.d/meshd"
+install -m 0644 package/meshd/files/meshd.config "$rootdir/etc/config/meshd"
 
 cat > "$rootdir/.PKGINFO" <<EOF
 pkgname: $pkgname

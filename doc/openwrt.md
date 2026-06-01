@@ -12,8 +12,8 @@ download packages.
 | Path | Purpose |
 |------|---------|
 | `/usr/bin/meshd` | The daemon (static, CGO-free Go binary) |
-| `/etc/init.d/meshd` | procd init script ([`package/meshd.init`](../package/meshd.init)) |
-| `/etc/config/meshd` | UCI config consumed by the init script ([`package/meshd.config`](../package/meshd.config)) |
+| `/etc/init.d/meshd` | procd init script ([`package/meshd/files/meshd.init`](../package/meshd/files/meshd.init)) |
+| `/etc/config/meshd` | UCI config consumed by the init script ([`package/meshd/files/meshd.config`](../package/meshd/files/meshd.config)) |
 | `/etc/meshd/` | Database (`meshd.bolt`) and device identity (`identity/`) |
 
 The init script maps UCI options to the `MESHD_*` environment the daemon reads.
@@ -53,7 +53,11 @@ server), so the ubus surface and its ACL stay in sync.
   [`scripts/package-apk.sh`](../scripts/package-apk.sh); see
   [Releases & Installation](../README.md#releases--installation).
 - **Feed packages** for the official OpenWrt / LuCI feeds are described by
-  `Makefile`s (e.g. [`package/luci-app-meshd/Makefile`](../package/luci-app-meshd/Makefile)),
-  which OpenWrt's build infrastructure compiles for every architecture. A
-  `meshd` package `Makefile` (using `golang-package.mk`) is the next packaging
-  step toward an official-feed submission.
+  `Makefile`s — [`package/meshd/Makefile`](../package/meshd/Makefile) (the
+  daemon, via `golang-package.mk`) and
+  [`package/luci-app-meshd/Makefile`](../package/luci-app-meshd/Makefile) (the
+  LuCI app, via `luci.mk`). OpenWrt's build infrastructure compiles these for
+  every architecture, so the per-arch matrix in the release workflow is only
+  needed for the direct-download packages. Bump `PKG_VERSION`/`PKG_HASH` in
+  [`package/meshd/Makefile`](../package/meshd/Makefile) per release before
+  submitting to a feed.
