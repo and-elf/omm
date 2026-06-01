@@ -3,8 +3,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 pkgname=meshd
-version=0.1.0
-arch=all
+# Overridable by the release workflow; defaults preserve local/CI behaviour.
+version="${VERSION:-0.1.0}"
+arch="${ARCH:-all}"
 output=build/ipk
 pkgdir="$output/pkg"
 controldir="$output/control"

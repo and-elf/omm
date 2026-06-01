@@ -141,6 +141,39 @@ instructions. Build the full single-binary product (frontend + daemon) with:
 
 ---
 
+# Releases & Installation
+
+Pushing a `v*` tag (e.g. `v0.2.0`) triggers the release workflow, which
+cross-compiles `meshd` as a static, CGO-free binary for four ISA groups and
+publishes a GitHub Release with per-architecture OpenWrt packages attached.
+
+A single binary is ABI-compatible across every OpenWrt subtarget in its ISA
+group, so the same binary is repackaged under each CPU-tuned arch name that
+`opkg`/`apk` checks against. The release covers the dominant real-world
+subtargets:
+
+| Architecture | OpenWrt package arch (covers) |
+|--------------|-------------------------------|
+| x86_64 | `x86_64` (VMs, x86 routers) |
+| arm64 | `aarch64_generic`, `aarch64_cortex-a53`, `aarch64_cortex-a72` (mvebu, bcm27xx/RPi, mediatek filogic) |
+| armv7 | `arm_cortex-a7_neon-vfpv4`, `arm_cortex-a9` (ipq40xx and similar) |
+| mipsle | `mipsel_24kc`, `mipsel_74kc` (ramips/mt7621) |
+
+Find your device's arch and install the matching package:
+
+```sh
+opkg print-architecture          # 23.05 and earlier
+opkg install meshd_<version>_<arch>.ipk
+
+apk info --print-arch            # 24.10+
+apk add --allow-untrusted meshd-<version>-<arch>.apk
+```
+
+If your subtarget is not listed above, the binary is still compatible within
+its ISA group; install with `opkg install --force-architecture`.
+
+---
+
 # Network Model
 
 ## Home

@@ -3,8 +3,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 pkgname=meshd
-version=0.1.0
-arch=x86_64
+# Overridable by the release workflow; defaults preserve local/CI behaviour.
+version="${VERSION:-0.1.0}"
+arch="${ARCH:-x86_64}"
 output=build/apk
 rootdir="$output/root"
 
@@ -24,6 +25,8 @@ EOF
 
 mkdir -p build
 
-tar -C "$rootdir" -czf "build/${pkgname}-${version}.apk" .
+# Arch is part of the filename so a multi-arch release can attach every
+# variant without collisions (the .ipk name already carries its arch).
+tar -C "$rootdir" -czf "build/${pkgname}-${version}-${arch}.apk" .
 
-echo "Created build/${pkgname}-${version}.apk"
+echo "Created build/${pkgname}-${version}-${arch}.apk"
