@@ -38,11 +38,11 @@ func Announce(ctx context.Context, address string, ann Announcement, interval ti
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	// Announce immediately, then on each tick.
+	// Announce immediately, then on each tick. Write errors are transient (e.g.
+	// a connected-UDP peer momentarily down yields ECONNREFUSED via an ICMP
+	// port-unreachable); keep announcing rather than giving up.
 	for {
-		if _, err := conn.Write(payload); err != nil {
-			return fmt.Errorf("write announce: %w", err)
-		}
+		_, _ = conn.Write(payload)
 		select {
 		case <-ctx.Done():
 			return nil

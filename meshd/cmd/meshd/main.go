@@ -83,12 +83,32 @@ func main() {
 		wifiClients,
 	)
 
+	// Passively cache controller announcements so /scan answers instantly.
+	discoCache := discovery.NewCache(90*time.Second, nil)
+	go func() {
+		if err := discoCache.Listen(ctx, cfg.UDPListen); err != nil {
+			log.Printf("discovery listen error: %v", err)
+		}
+	}()
+
 	router := api.NewRouter(store, profileManager,
 		api.WithEnrollment(enrollSvc),
 		api.WithSelf(id, cfg.Serial),
 		api.WithSelfHome(cfg.HomeID),
 		api.WithTopology(collector),
 		api.WithSignalSource(wifiClients),
+		api.WithScanner(func(context.Context) ([]discovery.Announcement, error) {
+			// Answer from the passively-maintained cache, dropping this
+			// device's own Home.
+			list := discoCache.List()
+			out := list[:0]
+			for _, a := range list {
+				if a.HomeID != cfg.HomeID {
+					out = append(out, a)
+				}
+			}
+			return out, nil
+		}),
 	)
 
 	// Announce this controller's presence for discovery.

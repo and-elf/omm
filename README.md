@@ -617,7 +617,11 @@ Approves enrollment.
 meshd.scan
 ```
 
-Discovers controllers and networks.
+Discovers controllers and networks. The HTTP API exposes this as `GET /scan`,
+returning nearby controllers (Homes) the daemon has heard announce. Each daemon
+passively listens for UDP announcements into a short-lived cache, so the scan
+answers instantly; the PWA's enrollment screen lists the results to join with
+one click instead of typing a controller URL.
 
 ---
 

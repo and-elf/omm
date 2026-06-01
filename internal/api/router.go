@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/and-elf/omm/internal/discovery"
 	"github.com/and-elf/omm/internal/enrollment"
 	"github.com/and-elf/omm/internal/identity"
 	"github.com/and-elf/omm/internal/models"
@@ -28,7 +29,12 @@ type apiHandler struct {
 	topology       *topology.Collector
 	topoAgg        *topology.Aggregator
 	signals        SignalSource
+	scan           Scanner
 }
+
+// Scanner discovers nearby controllers (announced Homes) so the UI can present
+// a pick-list instead of a typed URL.
+type Scanner func(ctx context.Context) ([]discovery.Announcement, error)
 
 // SignalSource provides observed peer RSSI (dBm) keyed by lower-case MAC. The
 // topology UbusClients satisfies it, so home selection reuses the same source.
@@ -76,6 +82,11 @@ func WithSignalSource(src SignalSource) Option {
 	return func(h *apiHandler) { h.signals = src }
 }
 
+// WithScanner enables GET /scan, which discovers nearby controllers.
+func WithScanner(scan Scanner) Option {
+	return func(h *apiHandler) { h.scan = scan }
+}
+
 type statusResponse struct {
 	Status string `json:"status"`
 }
@@ -121,6 +132,9 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 	}
 	if h.signals != nil {
 		r.Get("/home-selection", h.getHomeSelection)
+	}
+	if h.scan != nil {
+		r.Get("/scan", h.scanControllers)
 	}
 
 	if h.enrollment != nil {
