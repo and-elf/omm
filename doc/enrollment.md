@@ -136,11 +136,11 @@ Unclaimed → Discovering → ControllerFound → Enrolling
 ## Concurrency
 
 Many nodes may enroll simultaneously. The controller must handle concurrent
-`/enroll/request` and `/adopt` calls without data races or `database is locked`
-errors; the storage layer is configured for concurrent access (WAL +
-`busy_timeout`, serialized writes). The e2e suite asserts that N clients
-enrolling in parallel all reach `active` and appear exactly once in
-`GET /nodes`.
+`/enroll/request` and `/adopt` calls without data races. The storage layer
+(bbolt) serializes writes through a single write transaction and serves reads
+concurrently via MVCC, so simultaneous writers wait for the lock instead of
+failing. The e2e suite asserts that N clients enrolling in parallel all reach
+`active` and appear exactly once in `GET /nodes`.
 
 ## End-to-end test topology
 

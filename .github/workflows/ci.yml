@@ -74,8 +74,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [go-unit, frontend-unit, go-integration]
     env:
-      # meshd uses the pure-Go modernc.org/sqlite driver, so the release binary
-      # is built CGO-free to cross-compile cleanly for OpenWrt targets.
+      # meshd stores state in pure-Go bbolt (no CGO), so the binary is built
+      # CGO-free to cross-compile cleanly for every OpenWrt target.
       CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@v4

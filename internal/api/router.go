@@ -118,13 +118,16 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 	r.Post("/homes", h.createHome)
 	r.Get("/homes/{homeID}", h.getHome)
 	r.Put("/homes/{homeID}", h.updateHome)
+	r.Delete("/homes/{homeID}", h.deleteHome)
 	r.Get("/homes/{homeID}/profile", h.getProfile)
 	r.Post("/homes/{homeID}/profile", h.createProfile)
 	r.Get("/nodes", h.listNodes)
 	r.Post("/nodes", h.createNode)
 	r.Get("/nodes/{nodeID}", h.getNode)
+	r.Delete("/nodes/{nodeID}", h.deleteNode)
 	r.Get("/active-home", h.getActiveHome)
 	r.Put("/active-home", h.setActiveHome)
+	r.Post("/reset", h.reset)
 
 	if h.topology != nil {
 		r.Get("/topology", h.getTopology)

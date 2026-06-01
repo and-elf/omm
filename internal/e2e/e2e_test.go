@@ -185,7 +185,7 @@ func (h *harness) startDaemon(alias string, env map[string]string) testcontainer
 	base := map[string]string{
 		"MESHD_HTTP_ADDR":     "0.0.0.0:8080",
 		"MESHD_AUTO_ADOPT":    "1",
-		"MESHD_DATABASE_PATH": "/tmp/meshd.db",
+		"MESHD_DATABASE_PATH": "/tmp/meshd.bolt",
 		"MESHD_IDENTITY_DIR":  "/tmp/id",
 		"MESHD_UDP_BROADCAST": "127.0.0.1:45678",
 	}

@@ -38,7 +38,7 @@ type Config struct {
 func Load() Config {
 	return Config{
 		HTTPAddr:     envOr("MESHD_HTTP_ADDR", "0.0.0.0:8080"),
-		DatabasePath: envOr("MESHD_DATABASE_PATH", "./meshd.db"),
+		DatabasePath: envOr("MESHD_DATABASE_PATH", "./meshd.bolt"),
 		UDPListen:    envOr("MESHD_UDP_LISTEN", ":45678"),
 		UbusSocket:   envOr("MESHD_UBUS_SOCKET", "/var/run/ubus.sock"),
 		UbusBinary:   envOr("MESHD_UBUS_BINARY", "ubus"),

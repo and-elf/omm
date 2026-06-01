@@ -6,6 +6,18 @@ project overview.
 
 ---
 
+## Scope
+
+A profile carries the mesh-level settings OMM orchestrates — node name, mesh
+SSID/key — which it applies to UCI and reloads on the running system when the
+Home becomes active (see [Profile Switching](#profile-switching)).
+
+Lower-level, per-interface policy such as **VLANs and firewall rules** sits
+below mesh routing and is left to OpenWrt's own tooling (LuCI / UCI). OMM does
+not author that configuration: the `vlans` field on a profile is stored but not
+applied, so an operator's LuCI-managed VLAN and firewall setup is never
+overwritten.
+
 ## Profile System
 
 Each Home has an independent profile.

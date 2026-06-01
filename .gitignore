@@ -19,7 +19,7 @@
 
 meshd-*.ipk
 meshd-*.apk
-meshd.db
+meshd.bolt
 
 # Code coverage profiles and other test artifacts
 *.out

@@ -180,61 +180,57 @@ Controller announcement:
 
 # Storage Layer
 
-## Preferred Database
-
-For MVP:
-
-```text
-SQLite
-```
-
-Recommended:
+## Database
 
 ```go
-modernc.org/sqlite
+go.etcd.io/bbolt
 ```
+
+A pure-Go embedded key/value store.
 
 Advantages:
 
 * Pure Go
 * No CGO
-* Cross-compiles cleanly
-* Good OpenWrt compatibility
+* Cross-compiles cleanly to **every** OpenWrt target, including 32-bit
+  little-endian MIPS (`mipsle`, the dominant ath79/ramips router class)
+* A single memory-mapped file; serialized writes, MVCC reads
+
+> **Why not SQLite?** `modernc.org/sqlite` (the pure-Go SQLite driver) ships no
+> generated sources for 32-bit MIPS, so it cannot cross-compile for
+> `GOARCH=mipsle`. Since that arch covers most consumer OpenWrt routers, the
+> storage layer uses bbolt, which supports it.
 
 ---
 
-Example:
+The store is opened once and shared. An empty path or `:memory:` yields an
+ephemeral database (used by tests) backed by a temp file removed on `Close`:
 
 ```go
-db, err := sql.Open(
-    "sqlite",
-    "/etc/meshd/meshd.db",
-)
+db, err := storage.OpenDB("/etc/meshd/meshd.bolt")
+defer db.Close()
+store := storage.NewStore(db)
 ```
 
 ---
 
-## Homes Table
+## Layout
 
-```sql
-CREATE TABLE homes (
-    id TEXT PRIMARY KEY,
-    name TEXT,
-    last_connected INTEGER
-);
-```
+Each record type lives in its own bucket, stored as JSON keyed by its primary
+identifier. The `Store` interface (see `internal/storage`) is the only contract
+consumers depend on, so the backend can change without touching callers.
 
----
+| Bucket | Key | Value |
+| --- | --- | --- |
+| `homes` | home id | `models.Home` (JSON) |
+| `nodes` | node id | `models.Node` (JSON) |
+| `profiles` | home id | `models.Profile` (JSON) |
+| `settings` | setting name | string (`active_home`, `setup_complete`) |
+| `enrollments` | enrollment id | `models.Enrollment` (JSON) |
+| `enrollments_by_node` | node id | enrollment id (secondary index) |
 
-## Nodes Table
-
-```sql
-CREATE TABLE nodes (
-    id TEXT PRIMARY KEY,
-    home_id TEXT,
-    last_seen INTEGER
-);
-```
+`enrollments_by_node` indexes node id → enrollment id so lookup by node is a
+direct read rather than a scan; `ListEnrollments` sorts by `created_at` in Go.
 
 ---
 

@@ -73,3 +73,16 @@ returning nearby controllers (Homes) the daemon has heard announce. Each daemon
 passively listens for UDP announcements into a short-lived cache, so the scan
 answers instantly; the PWA's enrollment screen lists the results to join with
 one click instead of typing a controller URL.
+
+---
+
+## Lifecycle (REST)
+
+Destructive operations for forgetting Homes/nodes and factory-resetting the
+device. All return `204 No Content` on success.
+
+| Endpoint | Effect |
+|----------|--------|
+| `DELETE /homes/{homeID}` | Forget a Home and everything scoped to it: its profile, its enrollment records, and every node's membership of it (current-home pointers and trusted-homes lists are cleared; the nodes themselves survive). Returns `409 Conflict` if it is the **active** Home — switch to another Home first — and `404` if unknown. |
+| `DELETE /nodes/{nodeID}` | Decommission a node, removing it and its enrollment record. `404` if unknown. |
+| `POST /reset` | Factory reset: clear all stored state (Homes, nodes, profiles, enrollments, active Home, setup flag), returning the device to its just-installed condition. Also used to reset state between e2e runs that reuse the same container. |

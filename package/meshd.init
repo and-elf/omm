@@ -13,7 +13,7 @@ start_service() {
 
 	config_get role main role controller
 	config_get http_addr main http_addr 0.0.0.0:8080
-	config_get database_path main database_path /etc/meshd/meshd.db
+	config_get database_path main database_path /etc/meshd/meshd.bolt
 	config_get udp_listen main udp_listen :45678
 	config_get home_id main home_id default-home
 	config_get home_name main home_name Home
