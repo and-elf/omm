@@ -17,6 +17,7 @@ import (
 	"github.com/and-elf/omm/internal/identity"
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/profiles"
+	"github.com/and-elf/omm/internal/selection"
 	"github.com/and-elf/omm/internal/storage"
 	"github.com/and-elf/omm/internal/topology"
 	"github.com/and-elf/omm/internal/ubus"
@@ -101,6 +102,10 @@ func main() {
 		}
 	}()
 
+	// If no Home is active yet, pick one (last-active / strongest RSSI, with the
+	// device's own Home as a last resort) and apply it.
+	go autoSelectHome(ctx, store, profileManager, wifiClients, cfg.HomeID)
+
 	// Optionally enroll into other homes at startup (membership; a device is
 	// only ever active in one home at a time).
 	for _, controllerURL := range cfg.Join {
@@ -113,6 +118,41 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown failed: %v", err)
+	}
+}
+
+// autoSelectHome activates a Home on boot when none is explicitly set, using
+// the home-selection policy fed by live RSSI. An already-set active Home is
+// respected (the operator's explicit choice wins). Best-effort: failures are
+// logged, not fatal.
+func autoSelectHome(ctx context.Context, store storage.Store, pm profiles.ProfileManager, signals topology.UbusClients, selfHomeID string) {
+	if active, err := store.GetActiveHome(ctx); err != nil || active != "" {
+		return
+	}
+
+	homes, err := store.ListHomes(ctx)
+	if err != nil || len(homes) == 0 {
+		return
+	}
+
+	sig := selection.Signals{}
+	if observed, err := signals.SignalByMAC(ctx); err == nil {
+		sig = observed
+	}
+
+	best, ok := selection.Recommend(homes, selfHomeID, "", sig)
+	if !ok {
+		return
+	}
+
+	if err := store.SetActiveHome(ctx, best.HomeID); err != nil {
+		log.Printf("auto-select: failed to set active home: %v", err)
+		return
+	}
+	log.Printf("auto-selected active home %s (signal=%d self=%v)", best.HomeID, best.Signal, best.SelfControlled)
+
+	if err := pm.ApplyProfileForHome(ctx, best.HomeID); err != nil {
+		log.Printf("auto-select: apply profile for %s failed (non-fatal): %v", best.HomeID, err)
 	}
 }
 

@@ -101,6 +101,9 @@ choice (`internal/homeselect`) follows this precedence:
    PUT /active-home  { "home_id": "..." }                 (must be a known Home)
    ```
 
+   On boot, if no Home is active yet, the daemon applies the recommended Home
+   automatically (and its profile); an already-set active Home is respected.
+
 2. **Automatic policy** when no explicit selection applies:
    - prefer an externally-controlled Home over the device's own — being your
      own controller is a **last resort**;
