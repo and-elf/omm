@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/and-elf/omm/internal/enrollment"
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/profiles"
 	"github.com/and-elf/omm/internal/storage"
@@ -17,6 +18,15 @@ import (
 type apiHandler struct {
 	store          storage.Store
 	profileManager profiles.ProfileManager
+	enrollment     *enrollment.Service
+}
+
+// Option customizes the router/handler.
+type Option func(*apiHandler)
+
+// WithEnrollment registers the controller-side enrollment endpoints.
+func WithEnrollment(svc *enrollment.Service) Option {
+	return func(h *apiHandler) { h.enrollment = svc }
 }
 
 type statusResponse struct {
@@ -35,9 +45,12 @@ type profileResponse struct {
 	Profile models.Profile `json:"profile"`
 }
 
-func NewRouter(store storage.Store, profileManager profiles.ProfileManager) http.Handler {
+func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts ...Option) http.Handler {
 	r := chi.NewRouter()
 	h := &apiHandler{store: store, profileManager: profileManager}
+	for _, opt := range opts {
+		opt(h)
+	}
 
 	r.Get("/health", healthHandler)
 	r.Get("/status", statusHandler)
@@ -49,6 +62,14 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager) http
 	r.Get("/nodes", h.listNodes)
 	r.Post("/nodes", h.createNode)
 	r.Get("/nodes/{nodeID}", h.getNode)
+
+	if h.enrollment != nil {
+		r.Post("/enroll/request", h.enrollRequest)
+		r.Post("/enroll/verify", h.enrollVerify)
+		r.Get("/enroll/{enrollmentID}", h.enrollStatus)
+		r.Post("/enroll/{enrollmentID}/ack", h.enrollAck)
+		r.Post("/nodes/{nodeID}/adopt", h.adoptNode)
+	}
 
 	// Serve the embedded Progressive Web App for any non-API route. This is
 	// registered last so the specific API routes above always take precedence.

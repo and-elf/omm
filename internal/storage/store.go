@@ -21,6 +21,10 @@ type Store interface {
 	CreateNode(ctx context.Context, node models.Node) error
 	GetProfile(ctx context.Context, homeID string) (models.Profile, error)
 	CreateOrUpdateProfile(ctx context.Context, profile models.Profile) error
+	CreateEnrollment(ctx context.Context, enrollment models.Enrollment) error
+	GetEnrollment(ctx context.Context, id string) (models.Enrollment, error)
+	GetEnrollmentByNodeID(ctx context.Context, nodeID string) (models.Enrollment, error)
+	UpdateEnrollment(ctx context.Context, enrollment models.Enrollment) error
 }
 
 type sqliteStore struct {
@@ -156,6 +160,63 @@ func (s *sqliteStore) CreateOrUpdateProfile(ctx context.Context, profile models.
 		return fmt.Errorf("insert/update profile: %w", err)
 	}
 	return nil
+}
+
+func (s *sqliteStore) CreateEnrollment(ctx context.Context, e models.Enrollment) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO enrollments (id, node_id, serial, public_key, challenge, status, home_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, e.NodeID, e.Serial, e.PublicKey, e.Challenge, string(e.Status), e.HomeID, e.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert enrollment: %w", err)
+	}
+	return nil
+}
+
+func (s *sqliteStore) GetEnrollment(ctx context.Context, id string) (models.Enrollment, error) {
+	return scanEnrollment(s.db.QueryRowContext(ctx,
+		`SELECT id, node_id, serial, public_key, challenge, status, home_id, created_at FROM enrollments WHERE id = ?`, id))
+}
+
+func (s *sqliteStore) GetEnrollmentByNodeID(ctx context.Context, nodeID string) (models.Enrollment, error) {
+	return scanEnrollment(s.db.QueryRowContext(ctx,
+		`SELECT id, node_id, serial, public_key, challenge, status, home_id, created_at FROM enrollments WHERE node_id = ?`, nodeID))
+}
+
+func (s *sqliteStore) UpdateEnrollment(ctx context.Context, e models.Enrollment) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE enrollments SET serial = ?, public_key = ?, challenge = ?, status = ?, home_id = ? WHERE id = ?`,
+		e.Serial, e.PublicKey, e.Challenge, string(e.Status), e.HomeID, e.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update enrollment: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanEnrollment(row rowScanner) (models.Enrollment, error) {
+	var e models.Enrollment
+	var status string
+	if err := row.Scan(&e.ID, &e.NodeID, &e.Serial, &e.PublicKey, &e.Challenge, &status, &e.HomeID, &e.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.Enrollment{}, ErrNotFound
+		}
+		return models.Enrollment{}, err
+	}
+	e.Status = models.EnrollmentStatus(status)
+	return e, nil
 }
 
 func encodeVLANs(vlans []string) string {
