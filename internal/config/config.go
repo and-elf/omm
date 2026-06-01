@@ -44,7 +44,7 @@ func Load() Config {
 		APIAdvertise: os.Getenv("MESHD_API_ADVERTISE"),
 		UDPBroadcast: envOr("MESHD_UDP_BROADCAST", "255.255.255.255:45678"),
 
-		IdentityDir: envOr("MESHD_IDENTITY_DIR", "/etc/meshd/identity"),
+		IdentityDir: envOr("MESHD_IDENTITY_DIR", "./meshd-identity"),
 		Serial:      envOr("MESHD_SERIAL", hostnameOr("unknown")),
 		Join:        splitList(os.Getenv("MESHD_JOIN")),
 	}

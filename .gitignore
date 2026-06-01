@@ -17,6 +17,10 @@
 # Packaging output (.ipk / .apk)
 /build/
 
+meshd-*.ipk
+meshd-*.apk
+meshd.db
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
@@ -43,3 +47,4 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+/meshd-identity/
