@@ -32,6 +32,14 @@ export interface ActiveHome {
   home_id: string
 }
 
+export interface Setup {
+  setup_complete: boolean
+  node_id: string
+  serial: string
+  home_id: string
+  home_name: string
+}
+
 export type EnrollmentStatus =
   | 'pending_verification'
   | 'pending_approval'

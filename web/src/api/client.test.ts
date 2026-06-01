@@ -130,6 +130,26 @@ describe('ApiClient', () => {
     )
   })
 
+  it('reads setup state and completes setup', async () => {
+    const fetchFn = mockFetch({ json: { setup_complete: false, home_id: 'h1', node_id: 'n1' } })
+    const client = new ApiClient('', fetchFn)
+
+    await expect(client.getSetup()).resolves.toMatchObject({ setup_complete: false, home_id: 'h1' })
+    await client.completeSetup()
+    expect(fetchFn).toHaveBeenCalledWith('/setup/complete', expect.objectContaining({ method: 'POST' }))
+  })
+
+  it('updates a home via PUT', async () => {
+    const fetchFn = mockFetch({ json: { id: 'h1', name: 'Cottage' } })
+    const client = new ApiClient('', fetchFn)
+
+    await client.updateHome('h1', { name: 'Cottage' })
+    expect(fetchFn).toHaveBeenCalledWith(
+      '/homes/h1',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ name: 'Cottage' }) }),
+    )
+  })
+
   it('throws an ApiError carrying the status code on failure', async () => {
     const client = new ApiClient('', mockFetch({ ok: false, status: 500, json: { error: 'boom' } }))
 

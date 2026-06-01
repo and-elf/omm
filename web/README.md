@@ -80,12 +80,14 @@ web/
 
 ## Status
 
-Implemented: app shell + navigation, API client, Dashboard (daemon status +
-home/node counts), Homes (list, create, set-active), Home detail with profile
-editor, Enrollment (pending-adoption approve/reject queue + join-another-home),
-Nodes list and node detail, PWA manifest + service worker.
+Implemented: first-boot onboarding wizard (Create New Home / Join Existing Home
+/ Advanced) shown until the device is set up, app shell + navigation, API
+client, Dashboard (daemon status + home/node counts), Homes (list, create,
+set-active), Home detail with profile editor, Enrollment (pending-adoption
+approve/reject queue + join-another-home), Nodes list and node detail, a
+Settings screen (device identity, home, active home, re-run setup), and PWA
+manifest + service worker.
 
 Pending: the Topology view is a placeholder until `meshd` exposes a
 `/topology` endpoint; it will then render the mesh graph with Cytoscape.js as
-described in the spec. A first-boot onboarding wizard and a settings screen are
-also future work.
+described in the spec.

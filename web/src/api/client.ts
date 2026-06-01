@@ -5,6 +5,7 @@ import type {
   Home,
   Node,
   Profile,
+  Setup,
   Status,
 } from '@/types'
 
@@ -76,8 +77,23 @@ export class ApiClient {
     return nodes ?? []
   }
 
+  getSetup(): Promise<Setup> {
+    return this.request<Setup>('/setup')
+  }
+
+  completeSetup(): Promise<unknown> {
+    return this.request('/setup/complete', { method: 'POST' })
+  }
+
   getHome(homeId: string): Promise<Home> {
     return this.request<Home>(`/homes/${encodeURIComponent(homeId)}`)
+  }
+
+  updateHome(homeId: string, fields: Partial<Pick<Home, 'name' | 'controller'>>): Promise<Home> {
+    return this.request<Home>(`/homes/${encodeURIComponent(homeId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(fields),
+    })
   }
 
   getNode(nodeId: string): Promise<Node> {
