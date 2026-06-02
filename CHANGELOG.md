@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-02
+
+### Fixed
+- **LuCI Mesh Manager "Access denied".** The LuCI host view handed the embedded
+  PWA `L.env.token` (LuCI's CSRF token) as the `/ubus` session token; rpcd does
+  not recognise it as a session, so every meshd ubus call the PWA made was
+  rejected. The view now passes `L.env.sessionid` (the rpcd ubus session id),
+  so the Mesh Manager works inside LuCI.
+
 ## [0.1.0] - 2026-06-02
 
 First release with the full secure OpenWrt integration: a mutual-TLS mesh
@@ -58,6 +67,7 @@ control plane, a native LuCI app, and signed opkg **and** apk package feeds.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/and-elf/omm/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/and-elf/omm/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/and-elf/omm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/and-elf/omm/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/and-elf/omm/releases/tag/v0.0.1
