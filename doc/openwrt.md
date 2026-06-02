@@ -18,6 +18,28 @@ download packages.
 
 The init script maps UCI options to the `MESHD_*` environment the daemon reads.
 
+### Management / mesh plane split
+
+meshd separates two HTTP planes:
+
+- **Management plane** — admin/UI: `/status`, `/setup*`, `/homes*`, `/nodes*`,
+  `/active-home`, `/home-selection`, `/scan`, `/reset`, the pending-enrollment
+  list + adopt/reject, `/topology` (GET), and the PWA. Intended to bind to
+  **localhost** and be reached only through LuCI.
+- **Mesh control plane** — node-to-node: `/enroll/{request,verify,…,ack}`,
+  `/topology/report`, `GET /homes/{id}` (joined-Home metadata), `/health`. Stays
+  **network-reachable** on every controller.
+
+Configuration (UCI `meshd.main`, mapped to env):
+
+| Mode | UCI | Env | Behaviour |
+|------|-----|-----|-----------|
+| Combined (default) | `http_addr` | `MESHD_HTTP_ADDR` | one server, both planes on one address |
+| Split | `mgmt_addr` + `mesh_addr` (remove `http_addr`) | `MESHD_MGMT_ADDR` (`127.0.0.1:8080`) + `MESHD_MESH_ADDR` (`0.0.0.0:8081`) | management on localhost, mesh on the network |
+
+The discovery announcement carries the **mesh-facing** address, so joining nodes
+reach the control plane regardless of mode.
+
 ## LuCI integration (`luci-app-meshd`)
 
 Lives under [`package/luci-app-meshd/`](../package/luci-app-meshd/):
@@ -41,10 +63,13 @@ server), so the ubus surface and its ACL stay in sync.
    network): **not** covered by LuCI. This is meshd-to-meshd and needs the
    certificate-based mutual auth described in the [Security Model](security.md).
 
-> **Current limitation.** The LuCI app is in place, but meshd still serves its
-> management API on the network (`0.0.0.0:8080`), so the LuCI gate is not yet
-> the *only* way in. Binding the management plane to localhost — so rpcd/LuCI
-> is the real front door — and adding mesh-plane mTLS are the next steps.
+> **Status.** The plane split exists (see above) so the management API *can*
+> bind to localhost today. It is not yet the *default* (the shipped config runs
+> combined mode), and the LuCI view still iframes the PWA — which only works
+> while management is network-reachable. Making localhost the default depends on
+> the LuCI-native ubus UI (so the browser reaches management through LuCI's
+> authenticated session, not a direct port); mesh-plane mTLS is the parallel
+> next step. Until then the LuCI ACL gate is real but not yet the *only* door.
 
 ## Packaging
 

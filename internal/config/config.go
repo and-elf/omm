@@ -9,7 +9,13 @@ import (
 // for its own Home and can additionally enroll into other controllers (as a
 // node) at runtime or via Join.
 type Config struct {
+	// HTTPAddr, when set, runs a single "combined" server serving both the
+	// management and mesh planes on one address (backward-compatible). When
+	// empty, the daemon runs split listeners: MgmtAddr (admin/UI, localhost by
+	// default) and MeshAddr (node-to-node control plane, network by default).
 	HTTPAddr     string
+	MgmtAddr     string
+	MeshAddr     string
 	DatabasePath string
 	UDPListen    string
 	UbusSocket   string
@@ -35,9 +41,26 @@ type Config struct {
 	APInterfaces []string // hostapd interfaces to read clients from
 }
 
+// Combined reports whether the daemon should serve a single server (both planes
+// on HTTPAddr) rather than split management/mesh listeners.
+func (c Config) Combined() bool { return c.HTTPAddr != "" }
+
+// AnnounceAddr is the address other nodes should reach this controller's mesh
+// control plane on: the combined address when combined, otherwise the mesh
+// listener. It is the address wrapped into the discovery announcement when
+// APIAdvertise is not set explicitly.
+func (c Config) AnnounceAddr() string {
+	if c.Combined() {
+		return c.HTTPAddr
+	}
+	return c.MeshAddr
+}
+
 func Load() Config {
 	return Config{
-		HTTPAddr:     envOr("MESHD_HTTP_ADDR", "0.0.0.0:8080"),
+		HTTPAddr:     os.Getenv("MESHD_HTTP_ADDR"),
+		MgmtAddr:     envOr("MESHD_MGMT_ADDR", "127.0.0.1:8080"),
+		MeshAddr:     envOr("MESHD_MESH_ADDR", "0.0.0.0:8081"),
 		DatabasePath: envOr("MESHD_DATABASE_PATH", "./meshd.bolt"),
 		UDPListen:    envOr("MESHD_UDP_LISTEN", ":45678"),
 		UbusSocket:   envOr("MESHD_UBUS_SOCKET", "/var/run/ubus.sock"),

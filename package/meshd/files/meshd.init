@@ -8,11 +8,16 @@ STOP=10
 start_service() {
 	config_load meshd
 
-	local role http_addr database_path udp_listen home_id home_name controller_id
+	local role http_addr mgmt_addr mesh_addr database_path udp_listen home_id home_name controller_id
 	local auto_adopt controller_url identity_dir serial
 
 	config_get role main role controller
-	config_get http_addr main http_addr 0.0.0.0:8080
+	# When http_addr is set, meshd serves both planes on it (combined mode).
+	# Clear it (remove the option) to run split listeners: mgmt_addr (admin/UI)
+	# and mesh_addr (node-to-node control plane).
+	config_get http_addr main http_addr ""
+	config_get mgmt_addr main mgmt_addr 127.0.0.1:8080
+	config_get mesh_addr main mesh_addr 0.0.0.0:8081
 	config_get database_path main database_path /etc/meshd/meshd.bolt
 	config_get udp_listen main udp_listen :45678
 	config_get home_id main home_id default-home
@@ -28,6 +33,8 @@ start_service() {
 	procd_set_param env \
 		MESHD_ROLE="$role" \
 		MESHD_HTTP_ADDR="$http_addr" \
+		MESHD_MGMT_ADDR="$mgmt_addr" \
+		MESHD_MESH_ADDR="$mesh_addr" \
 		MESHD_DATABASE_PATH="$database_path" \
 		MESHD_UDP_LISTEN="$udp_listen" \
 		MESHD_HOME_ID="$home_id" \

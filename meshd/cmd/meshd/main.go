@@ -91,7 +91,7 @@ func main() {
 		}
 	}()
 
-	router := api.NewRouter(store, profileManager,
+	apiOpts := []api.Option{
 		api.WithEnrollment(enrollSvc),
 		api.WithSelf(id, cfg.Serial),
 		api.WithSelfHome(cfg.HomeID),
@@ -109,12 +109,13 @@ func main() {
 			}
 			return out, nil
 		}),
-	)
+	}
 
-	// Announce this controller's presence for discovery.
+	// Announce this controller's presence for discovery. Nodes reach the mesh
+	// control plane at the announced address, so it must be the mesh-facing one.
 	apiURL := cfg.APIAdvertise
 	if apiURL == "" {
-		apiURL = "http://" + cfg.HTTPAddr
+		apiURL = "http://" + cfg.AnnounceAddr()
 	}
 	go func() {
 		ann := discovery.Announcement{HomeID: cfg.HomeID, Name: cfg.HomeName, ControllerID: cfg.ControllerID, API: apiURL}
@@ -123,13 +124,28 @@ func main() {
 		}
 	}()
 
-	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: router}
-	go func() {
-		log.Printf("meshd up node_id=%s home=%s addr=%s auto_adopt=%v", id.NodeID(), cfg.HomeID, cfg.HTTPAddr, cfg.AutoAdopt)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server failed: %v", err)
+	// Combined mode (MESHD_HTTP_ADDR set) serves both planes on one address.
+	// Otherwise the management plane (admin/UI) and the mesh control plane
+	// (node-to-node) bind separately so the former can be kept off the network.
+	var servers []*http.Server
+	if cfg.Combined() {
+		servers = []*http.Server{{Addr: cfg.HTTPAddr, Handler: api.NewRouter(store, profileManager, apiOpts...)}}
+	} else {
+		servers = []*http.Server{
+			{Addr: cfg.MgmtAddr, Handler: api.NewManagementRouter(store, profileManager, apiOpts...)},
+			{Addr: cfg.MeshAddr, Handler: api.NewMeshRouter(store, profileManager, apiOpts...)},
 		}
-	}()
+	}
+	log.Printf("meshd up node_id=%s home=%s combined=%v auto_adopt=%v", id.NodeID(), cfg.HomeID, cfg.Combined(), cfg.AutoAdopt)
+	for _, srv := range servers {
+		srv := srv
+		go func() {
+			log.Printf("serving on %s", srv.Addr)
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("server %s failed: %v", srv.Addr, err)
+			}
+		}()
+	}
 
 	// Pick and apply a Home when none is active yet. autoSelectHome is
 	// idempotent (it respects an already-set active Home), so it is safe to run
@@ -154,8 +170,10 @@ func main() {
 	log.Println("shutting down meshd")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("shutdown failed: %v", err)
+	for _, srv := range servers {
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown %s failed: %v", srv.Addr, err)
+		}
 	}
 }
 

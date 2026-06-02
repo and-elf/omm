@@ -103,14 +103,72 @@ type profileResponse struct {
 	Profile models.Profile `json:"profile"`
 }
 
-func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts ...Option) http.Handler {
-	r := chi.NewRouter()
+func newHandler(store storage.Store, profileManager profiles.ProfileManager, opts ...Option) *apiHandler {
 	h := &apiHandler{store: store, profileManager: profileManager}
 	for _, opt := range opts {
 		opt(h)
 	}
+	return h
+}
 
+// NewRouter serves both planes on one handler — the combined mode used by tests
+// and by `MESHD_HTTP_ADDR` deployments. Split deployments use NewManagementRouter
+// and NewMeshRouter instead.
+func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts ...Option) http.Handler {
+	r := chi.NewRouter()
+	h := newHandler(store, profileManager, opts...)
+	// Management routes register GET /homes/{homeID} and the PWA catch-all; add
+	// only the mesh-plane routes that management does not already cover, to
+	// avoid duplicate (method, path) registrations.
+	h.registerManagementRoutes(r)
 	r.Get("/health", healthHandler)
+	if h.topology != nil {
+		r.Post("/topology/report", h.reportTopology)
+	}
+	if h.enrollment != nil {
+		r.Post("/enroll/request", h.enrollRequest)
+		r.Post("/enroll/verify", h.enrollVerify)
+		r.Get("/enroll/{enrollmentID}", h.enrollStatus)
+		r.Post("/enroll/{enrollmentID}/ack", h.enrollAck)
+	}
+	return r
+}
+
+// NewManagementRouter serves only the admin/UI plane (intended to bind to
+// localhost behind LuCI).
+func NewManagementRouter(store storage.Store, profileManager profiles.ProfileManager, opts ...Option) http.Handler {
+	r := chi.NewRouter()
+	newHandler(store, profileManager, opts...).registerManagementRoutes(r)
+	return r
+}
+
+// NewMeshRouter serves only the node-to-node control plane (stays network
+// reachable on every controller).
+func NewMeshRouter(store storage.Store, profileManager profiles.ProfileManager, opts ...Option) http.Handler {
+	r := chi.NewRouter()
+	newHandler(store, profileManager, opts...).registerMeshRoutes(r)
+	return r
+}
+
+// registerMeshRoutes registers the endpoints remote nodes call: enrollment
+// (inbound), topology reporting, joined-Home metadata, and health.
+func (h *apiHandler) registerMeshRoutes(r chi.Router) {
+	r.Get("/health", healthHandler)
+	r.Get("/homes/{homeID}", h.getHome) // nodes fetch joined-Home metadata
+	if h.topology != nil {
+		r.Post("/topology/report", h.reportTopology)
+	}
+	if h.enrollment != nil {
+		r.Post("/enroll/request", h.enrollRequest)
+		r.Post("/enroll/verify", h.enrollVerify)
+		r.Get("/enroll/{enrollmentID}", h.enrollStatus)
+		r.Post("/enroll/{enrollmentID}/ack", h.enrollAck)
+	}
+}
+
+// registerManagementRoutes registers the admin/UI plane, including the PWA
+// catch-all (last, so specific API routes win).
+func (h *apiHandler) registerManagementRoutes(r chi.Router) {
 	r.Get("/status", statusHandler)
 	r.Get("/setup", h.getSetup)
 	r.Post("/setup/complete", h.completeSetup)
@@ -131,7 +189,6 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 
 	if h.topology != nil {
 		r.Get("/topology", h.getTopology)
-		r.Post("/topology/report", h.reportTopology)
 	}
 	if h.signals != nil {
 		r.Get("/home-selection", h.getHomeSelection)
@@ -139,28 +196,20 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 	if h.scan != nil {
 		r.Get("/scan", h.scanControllers)
 	}
-
 	if h.enrollment != nil {
 		r.Get("/enroll", h.listEnrollments)
-		r.Post("/enroll/request", h.enrollRequest)
-		r.Post("/enroll/verify", h.enrollVerify)
-		r.Get("/enroll/{enrollmentID}", h.enrollStatus)
-		r.Post("/enroll/{enrollmentID}/ack", h.enrollAck)
 		r.Post("/nodes/{nodeID}/adopt", h.adoptNode)
 		r.Post("/nodes/{nodeID}/reject", h.rejectNode)
 	}
-
 	// A daemon with a device identity can enroll into other controllers as a
 	// node, independently of hosting its own Home.
 	if h.self != nil {
 		r.Post("/enroll/join", h.enrollJoin)
 	}
 
-	// Serve the embedded Progressive Web App for any non-API route. This is
-	// registered last so the specific API routes above always take precedence.
+	// Serve the embedded Progressive Web App for any non-API route, last so the
+	// specific API routes above always take precedence.
 	r.Handle("/*", web.NewHandler(web.DistFS()))
-
-	return r
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
