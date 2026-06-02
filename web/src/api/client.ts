@@ -1,3 +1,4 @@
+import { createUbusFetch } from './ubus'
 import type {
   ActiveHome,
   DiscoveredController,
@@ -168,5 +169,28 @@ export class ApiClient {
   }
 }
 
-/** Shared client instance pointed at the same origin as the served PWA. */
-export const api = new ApiClient()
+// __MESHD_UBUS__ is injected by the LuCI host page when the PWA is served
+// inside LuCI, carrying the authenticated rpcd session token. When present the
+// client talks to meshd through LuCI's /ubus endpoint instead of the REST API
+// directly, so the management API never has to be reachable on the network.
+declare global {
+  interface Window {
+    __MESHD_UBUS__?: { token: string; endpoint?: string }
+  }
+}
+
+/**
+ * Builds the shared client: a ubus-backed client when running inside LuCI
+ * (a session token is injected), otherwise a same-origin REST client (the
+ * standalone PWA served by meshd directly).
+ */
+export function createApi(): ApiClient {
+  const ubus = typeof window !== 'undefined' ? window.__MESHD_UBUS__ : undefined
+  if (ubus?.token) {
+    return new ApiClient('', createUbusFetch({ token: ubus.token, endpoint: ubus.endpoint }))
+  }
+  return new ApiClient()
+}
+
+/** Shared client instance, selected for the runtime environment. */
+export const api = createApi()

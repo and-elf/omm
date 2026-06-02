@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiClient } from './client'
+import { ApiClient, createApi } from './client'
 import { createUbusFetch } from './ubus'
 
 // ubusEnvelope mocks LuCI's /ubus JSON-RPC: result is [code, data].
@@ -72,5 +72,32 @@ describe('createUbusFetch', () => {
     const client = new ApiClient('', createUbusFetch({ token: 'tok', fetchFn: raw as unknown as typeof fetch }))
 
     await expect(client.getStatus()).rejects.toThrow(/ubus status 6/)
+  })
+})
+
+describe('createApi', () => {
+  afterEach(() => {
+    delete (window as Window).__MESHD_UBUS__
+    vi.restoreAllMocks()
+  })
+
+  it('uses the ubus transport when LuCI injects a session token', async () => {
+    ;(window as Window).__MESHD_UBUS__ = { token: 'sess-1' }
+    const raw = vi.fn().mockResolvedValue(ubusEnvelope({ status: 'ready' }))
+    vi.stubGlobal('fetch', raw)
+
+    await createApi().getStatus()
+
+    expect(raw).toHaveBeenCalledWith('/ubus', expect.any(Object))
+    expect(JSON.parse(raw.mock.calls[0][1].body).params[0]).toBe('sess-1')
+  })
+
+  it('uses the same-origin REST transport when no token is present', async () => {
+    const raw = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ status: 'ready' }) })
+    vi.stubGlobal('fetch', raw)
+
+    await createApi().getStatus()
+
+    expect(raw).toHaveBeenCalledWith('/status', expect.any(Object))
   })
 })
