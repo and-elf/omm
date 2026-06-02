@@ -90,10 +90,16 @@ opkg install meshd_<version>_<arch>.ipk
 If your subtarget is not listed above, the binary is still compatible within
 its ISA group; install with `opkg install --force-architecture`.
 
-The `.apk` artifacts are an extract-onto-the-rootfs convenience for apk-based
-(24.10+) systems — `tar -C / -xzf meshd-<version>-<arch>.apk` — **not** real
-`apk add` packages, and they are unsigned. The signed, verifiable path is the
-`.ipk` feed; see [OpenWrt Integration](doc/openwrt.md) for the apk caveat.
+On OpenWrt's newer **apk** userland (snapshot/25.x), the `.apk` artifacts are
+real, signed apk packages — trust the published key once, then install directly:
+
+```sh
+cp omm-apk.pub /etc/apk/keys/omm-apk.pub     # the maintainer's published EC key
+apk add ./meshd-<version>-<arch>.apk
+```
+
+(If the release is unsigned, add `--allow-untrusted`.) See
+[OpenWrt Integration](doc/openwrt.md#apk-packages-and-signing-2410) for details.
 
 ### As an opkg feed
 
@@ -117,6 +123,17 @@ If a release is **unsigned** (no `Packages.sig`), add `option check_signature 0`
 to that feed line instead. Generating the key and turning on signing is a
 maintainer step; see [OpenWrt Integration & Packaging](doc/openwrt.md). A stable
 rolling feed URL (vs the per-release URL above) is still planned.
+
+### As an apk feed
+
+On the apk userland the release also ships a signed `packages.adb` index, so it
+works as an apk feed too:
+
+```sh
+cp omm-apk.pub /etc/apk/keys/omm-apk.pub     # trust the published key once
+echo 'https://github.com/and-elf/omm/releases/download/v0.2.0' >> /etc/apk/repositories.d/customfeeds.list
+apk update && apk add meshd
+```
 
 Build the single-binary product (frontend + daemon) locally with
 `./scripts/build.sh` — see [Architecture & Components](doc/architecture.md).

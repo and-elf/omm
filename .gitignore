@@ -21,6 +21,12 @@ meshd-*.ipk
 meshd-*.apk
 meshd.bolt
 
+# Signing secret keys — NEVER commit (public keys are committed in package/)
+omm-feed.sec
+omm-apk.key
+private-key.pem
+*.key.pem
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*

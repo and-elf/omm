@@ -127,7 +127,7 @@ jobs:
           if-no-files-found: error
 
   package-apk:
-    name: Package .apk
+    name: Package & verify .apk signing
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -136,7 +136,14 @@ jobs:
         with:
           name: meshd-binary
           path: bin
-      - name: Build apk
+      # apk is built from source (the same approach used for usign); meson here
+      # lets get-apk-tools.sh build natively instead of via a container.
+      - name: Install apk-tools build deps
+        run: sudo apt-get update && sudo apt-get install -y meson ninja-build pkg-config libssl-dev zlib1g-dev
+      # Gate: sign→verify round-trip, tamper/wrong-key rejection, signed index.
+      - name: Verify apk signing round-trip
+        run: ./scripts/verify-apk-signing.sh
+      - name: Build apk (unsigned — no signing secret on CI/PRs)
         run: ./scripts/package-apk.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -162,7 +169,6 @@ jobs:
         run: |
           SKIP_FRONTEND=1 ./scripts/build.sh
           ./scripts/package-ipk.sh
-          ./scripts/package-apk.sh
       # ubuntu-latest ships Docker, so testcontainers connects automatically.
       - name: Run end-to-end tests
         run: go test -tags e2e -timeout 25m -v ./internal/e2e/...

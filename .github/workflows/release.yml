@@ -34,10 +34,28 @@ jobs:
           path: web/dist
           if-no-files-found: error
 
+  # apk-tools 3 (the apk package manager OpenWrt is moving to) is a build-host
+  # tool, built from source like usign. Build it once and share it with every
+  # packaging job so they don't each rebuild it.
+  apktools:
+    name: Build apk-tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install apk-tools build deps
+        run: sudo apt-get update && sudo apt-get install -y meson ninja-build pkg-config libssl-dev zlib1g-dev
+      - name: Build apk
+        run: ./scripts/get-apk-tools.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-tools
+          path: build/apk-tools/apk
+          if-no-files-found: error
+
   build:
     name: Build & package (${{ matrix.group }})
     runs-on: ubuntu-latest
-    needs: frontend
+    needs: [frontend, apktools]
     env:
       # Pure-Go (modernc.org/sqlite) so every target cross-compiles to a
       # static, glibc-free binary that runs on OpenWrt's musl userland.
@@ -94,9 +112,19 @@ jobs:
         env:
           SKIP_FRONTEND: "1"
         run: ./scripts/build.sh
+      - name: Fetch apk-tools
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-tools
+          path: apk-tools
+      - run: chmod +x apk-tools/apk
       - name: Package .ipk and .apk per OpenWrt arch
         env:
           VERSION: ${{ steps.ver.outputs.version }}
+          APK: ${{ github.workspace }}/apk-tools/apk
+          # Opt-in apk package signing: set the APK_SIGN_KEY secret (EC PEM, see
+          # scripts/gen-apk-key.sh). Unset ⇒ unsigned packages.
+          APK_SIGN_KEY: ${{ secrets.APK_SIGN_KEY }}
         run: |
           mkdir -p dist
           # package-ipk.sh wipes build/ipk each run, so copy each artifact out
@@ -145,6 +173,19 @@ jobs:
         # Lets users add the release as a feed instead of downloading each .ipk:
         #   src/gz omm https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: ./scripts/make-feed-index.sh dist
+      - name: Fetch apk-tools
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-tools
+          path: apk-tools
+      - run: chmod +x apk-tools/apk
+      - name: Build signed apk feed index
+        # apk counterpart of the opkg index: a (signed) packages.adb over the
+        # per-arch .apk files, so the release also works as an apk feed.
+        env:
+          APK: ${{ github.workspace }}/apk-tools/apk
+          APK_SIGN_KEY: ${{ secrets.APK_SIGN_KEY }}
+        run: ./scripts/make-apk-index.sh dist
       - name: Sign feed index
         # Opt-in: only signs when the maintainer has stored a usign secret key
         # in the OPKG_SIGN_KEY secret (generate with `usign -G`; see
@@ -172,8 +213,12 @@ jobs:
           assets=$(find dist -type f \( -name '*.ipk' -o -name '*.apk' \))
           assets="$assets dist/Packages dist/Packages.gz"
           [ -f dist/Packages.sig ] && assets="$assets dist/Packages.sig"
-          # Publish the feed's public key so devices can trust it (opkg-key add).
+          # apk feed index (packages.adb is self-signed when APK_SIGN_KEY is set).
+          [ -f dist/packages.adb ] && assets="$assets dist/packages.adb"
+          # Publish the feeds' public keys so devices can trust them
+          # (opkg-key add for usign; /etc/apk/keys/ for apk).
           [ -f package/omm-feed.pub ] && assets="$assets package/omm-feed.pub"
+          [ -f package/omm-apk.pub ] && assets="$assets package/omm-apk.pub"
           echo "Attaching:"; echo "$assets"
           # Idempotent: re-running the workflow (or re-pushing the tag) must not
           # fail just because a release for this tag already exists. Create it

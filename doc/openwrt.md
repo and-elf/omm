@@ -114,30 +114,43 @@ server), so the ubus surface and its ACL stay in sync.
   Remaining follow-up: the feed URL is **per-release**; a stable rolling feed —
   e.g. a `gh-pages` branch aggregating versions — would let `opkg update` track
   new releases without editing `customfeeds.conf`.
+- **apk packages & feed.** The same release builds real, signed apk-v3 packages
+  ([`scripts/package-apk.sh`](../scripts/package-apk.sh)) and a signed
+  `packages.adb` apk index ([`scripts/make-apk-index.sh`](../scripts/make-apk-index.sh)),
+  for OpenWrt's apk userland (snapshot/25.x). Signing is opt-in via the
+  `APK_SIGN_KEY` secret. See [apk packages and signing](#apk-packages-and-signing-2410)
+  below.
 
-### apk packages and signing (24.10+) — current limitation
+### apk packages and signing (24.10+)
 
 Everything above is the **opkg** path (`.ipk`, OpenWrt ≤23.05 and 24.10's opkg).
-The newer **apk** package manager uses an entirely separate scheme, so be aware:
+OpenWrt's newer **apk** package manager (apk-tools 3, default on snapshot/25.x)
+uses a separate scheme, fully supported here:
 
-- The published `.apk` files are **not real apk packages** — they are a plain
-  gzip tar with a `.PKGINFO` ([`scripts/package-apk.sh`](../scripts/package-apk.sh)),
-  installed by *extracting* onto the rootfs, not via `apk add`. They are a
-  convenience for dropping the binary onto a 24.10 userland.
-- **usign signing does not apply to apk.** opkg verifies a usign-signed
-  `Packages` index against keys in `/etc/opkg/keys/`; apk verifies an
-  **RSA-signed `APKINDEX`** against keys in `/etc/apk/keys/`. The `omm-feed.pub`
-  usign key is meaningless to apk.
-- We do not publish an apk repository (`APKINDEX.tar.gz`) at all.
+- The `.apk` files are **real, signed apk-v3 packages** built with `apk mkpkg`
+  ([`scripts/package-apk.sh`](../scripts/package-apk.sh)) — installable with
+  `apk add` and signature-verified, not the old extract-only tarball.
+- apk verifies each **package** (and the index) against EC public keys in
+  `/etc/apk/keys/`, matched by key *content* (the on-device filename is
+  irrelevant). This is a different scheme from usign, so the apk keypair is
+  independent of the `omm-feed.pub` usign key used for the opkg feed.
+- The release also publishes a signed apk repository index — `packages.adb`
+  ([`scripts/make-apk-index.sh`](../scripts/make-apk-index.sh)) — so the release
+  doubles as an apk feed, just like the opkg `Packages` index.
 
-Proper signed-apk support is future work and a distinct workstream: an RSA
-signing key, real apk package builds (OpenWrt's apk/abuild tooling, typically
-via the SDK), an RSA-signed `APKINDEX`, and shipping the RSA public key for
-`/etc/apk/keys/`. Until then, treat the `.apk` artifacts as unsigned
-extract-only convenience files; the **`.ipk` feed is the signed, verifiable
-path**.
+apk-tools is a build-host tool (not shipped on-device); the scripts and CI build
+it from upstream Alpine sources pinned to the version OpenWrt ships, via
+[`scripts/get-apk-tools.sh`](../scripts/get-apk-tools.sh) — the same approach
+used to build usign for opkg feed signing. The sign→verify round-trip (plus
+rejection of a wrong key, in-body corruption, and a tampered index) is exercised
+by [`scripts/verify-apk-signing.sh`](../scripts/verify-apk-signing.sh).
 
-### Enabling signed feeds (maintainer, one-time)
+> On-device note: as of this writing no published OpenWrt rootfs image ships apk
+> on-device yet (24.10 and snapshot still use opkg), so end-to-end `apk add` on a
+> real device is verified manually until such an image exists. The host-side
+> signing round-trip above is the automated CI gate.
+
+### Enabling the signed opkg feed (maintainer, one-time)
 
 The release workflow already signs the feed index *when* a key is configured;
 this is the one-time setup to provide it.
@@ -169,7 +182,7 @@ From then on every release signs `Packages` (→ `Packages.sig`) and attaches
 [`scripts/verify-luci-ubus.sh`](../scripts/verify-luci-ubus.sh)'s sibling check:
 `usign -G`/`-S`/`-V` round-trips and a tampered index is rejected.
 
-### Trusting the feed (device, one-time)
+### Trusting the opkg feed (device, one-time)
 
 ```sh
 # fetch the published public key, then trust it
@@ -182,3 +195,50 @@ opkg update            # now signature-verified
 > Bootstrapping note: a device must trust the key (`opkg-key add`, or bake the
 > key into the firmware image) **before** the first `opkg update`, since the
 > index it downloads is what the signature protects.
+
+### Enabling apk signing (maintainer, one-time)
+
+Analogous to the opkg setup, with an EC keypair instead of usign.
+
+1. **Generate the keypair** with [`scripts/gen-apk-key.sh`](../scripts/gen-apk-key.sh)
+   (pure `openssl`, EC `prime256v1` — OpenWrt's apk curve):
+
+   ```sh
+   ./scripts/gen-apk-key.sh         # writes omm-apk.key (secret) + omm-apk.pub
+   ```
+
+2. **Store the secret key** as the `APK_SIGN_KEY` Actions secret — never commit
+   it; keep an offline backup:
+
+   ```sh
+   gh secret set APK_SIGN_KEY < omm-apk.key
+   rm omm-apk.key                   # after backing it up
+   ```
+
+3. **Commit the public key** so the release workflow publishes it as an asset:
+
+   ```sh
+   cp omm-apk.pub package/omm-apk.pub
+   git add package/omm-apk.pub && git commit -m "chore: add apk signing public key"
+   ```
+
+From then on every release signs each `.apk` and the `packages.adb` index, and
+attaches `omm-apk.pub`. Without the secret the apk artifacts are built unsigned.
+
+### Trusting the apk feed (device, one-time)
+
+```sh
+# fetch the published public key and drop it in apk's trusted-keys dir
+wget https://github.com/and-elf/omm/releases/download/<tag>/omm-apk.pub
+cp omm-apk.pub /etc/apk/keys/omm-apk.pub
+# either install a single package directly…
+wget https://github.com/and-elf/omm/releases/download/<tag>/meshd-<version>-<arch>.apk
+apk add ./meshd-<version>-<arch>.apk
+# …or add the release as a feed (signed packages.adb) and let apk resolve it
+echo 'https://github.com/and-elf/omm/releases/download/<tag>' >> /etc/apk/repositories.d/customfeeds.list
+apk update && apk add meshd
+```
+
+> apk matches a trusted key by its *contents*, so the filename under
+> `/etc/apk/keys/` is arbitrary; the key must be present before installing, since
+> it is what the package/index signature is verified against.

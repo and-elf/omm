@@ -6,7 +6,7 @@
 //
 // Run with:
 //
-//	./scripts/build.sh && ./scripts/package-ipk.sh && ./scripts/package-apk.sh
+//	./scripts/build.sh && ./scripts/package-ipk.sh
 //	go test -tags e2e -timeout 25m ./internal/e2e/...
 package e2e
 
@@ -57,13 +57,16 @@ var targets = []target{
 		installSh: "mkdir -p /var/lock /var/run && opkg install /tmp/meshd.ipk",
 	},
 	{
-		name:     "apk-24.10",
-		image:    "docker.io/openwrt/rootfs:x86_64-24.10.7",
-		pkgRel:   "build/meshd-0.1.0-x86_64.apk",
-		destPath: "/tmp/meshd.apk",
-		// The repo's .apk is a plain gzip tar (not a signed apk package), so we
-		// install it by extracting onto the real 24.10 userland.
-		installSh: "tar -C / -xzf /tmp/meshd.apk",
+		// 24.10 still ships opkg on-device (no apk-based OpenWrt rootfs image
+		// exists yet), so this installs the .ipk too — its value is confirming
+		// the static binary runs on the newer 24.10 musl userland. Real apk
+		// package/index signing is covered host-side by verify-apk-signing.sh;
+		// an on-device `apk add` target lands once an apk-based image ships.
+		name:      "opkg-24.10",
+		image:     "docker.io/openwrt/rootfs:x86_64-24.10.7",
+		pkgRel:    "build/ipk/meshd_0.1.0_all.ipk",
+		destPath:  "/tmp/meshd.ipk",
+		installSh: "mkdir -p /var/lock /var/run && opkg install /tmp/meshd.ipk",
 	},
 }
 

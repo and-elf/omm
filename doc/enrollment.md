@@ -153,9 +153,11 @@ container images with the built package installed:
 
 - **23.05** image + `opkg install meshd_*.ipk` (a real opkg package: a gzip tar
   of `debian-binary`/`control.tar.gz`/`data.tar.gz`)
-- **24.10** image + the `.apk` extracted onto the rootfs. The repo's `.apk` is a
-  plain gzip tar rather than a signed apk package, so it is installed by
-  extraction; producing a real signed apk is future work.
+- **24.10** image + `opkg install meshd_*.ipk` — 24.10 still ships opkg
+  on-device, so this confirms the static binary runs on the newer musl userland.
+  Real signed apk packages/index are now produced and their signing is verified
+  host-side by `scripts/verify-apk-signing.sh`; an on-device `apk add` target
+  lands once a published OpenWrt rootfs image ships apk.
 
 One controller container (`MESHD_ROLE=controller`, `MESHD_AUTO_ADOPT=1`) and N
 client containers (`MESHD_ROLE=client`) are started; the test asserts all
