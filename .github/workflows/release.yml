@@ -101,13 +101,9 @@ jobs:
           path: web/dist
       - name: Derive version from tag
         id: ver
-        run: |
-          ref="${GITHUB_REF_NAME}"
-          # v1.2.3 -> 1.2.3; non-tag dispatch runs build a 0.0.0-dev package.
-          case "$ref" in
-            v*) echo "version=${ref#v}" >> "$GITHUB_OUTPUT" ;;
-            *)  echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT" ;;
-          esac
+        # v1.2.3 -> 1.2.3; non-tag dispatch runs build a 0.0.0_git package. The
+        # version must be valid for apk (stricter than opkg) — see the script.
+        run: echo "version=$(./scripts/derive-version.sh)" >> "$GITHUB_OUTPUT"
       - name: Cross-compile meshd (frontend already built)
         env:
           SKIP_FRONTEND: "1"

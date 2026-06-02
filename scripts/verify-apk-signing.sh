@@ -94,6 +94,19 @@ printf '\xa5\xa5\xa5\xa5\xa5\xa5\xa5\xa5' |
 	dd of="$idx.mid" bs=1 seek="$((isz/2))" count=8 conv=notrunc status=none
 desc="tampered index is rejected"; expect_fail verify "$work/keys" "$idx.mid"
 
+# apk's version grammar is stricter than opkg's; the release version must be
+# one apk accepts (regression guard for the 0.0.0-dev -> 0.0.0_git fix). Build
+# with the version the release workflow derives for both a dispatch run and a
+# tag — package-apk.sh fails if `apk mkpkg` rejects the version.
+echo "--- release version strings are apk-valid ---"
+for ref in "" "v1.2.3"; do
+	v="$(scripts/derive-version.sh "$ref")"
+	rm -rf build/apk-test; mkdir -p build/apk-test
+	desc="derive-version '${ref:-<dispatch>}' -> '$v' accepted by apk"
+	expect_ok env APK_SIGN_KEY_FILE="$work/signer.key" VERSION="$v" ARCH=x86_64 \
+		OUTPUT_DIR=build/apk-test scripts/package-apk.sh
+done
+
 echo "--- unsigned build is untrusted ---"
 rm -rf build/apk-test; mkdir -p build/apk-test
 VERSION=9.9.9 ARCH=x86_64 OUTPUT_DIR=build/apk-test scripts/package-apk.sh >/dev/null
