@@ -81,6 +81,17 @@ func (i *Identity) CertificatePEM() []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: i.certDER})
 }
 
+// PrivateKeyPEM returns the device private key in PEM form. Paired with a
+// Home-issued leaf it forms the node's mesh TLS certificate.
+func (i *Identity) PrivateKeyPEM() []byte {
+	der, err := x509.MarshalECPrivateKey(i.priv)
+	if err != nil {
+		// Unreachable for a valid ECDSA key.
+		panic(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
+}
+
 // Sign produces an ASN.1 ECDSA signature over the SHA-256 digest of data.
 func (i *Identity) Sign(data []byte) ([]byte, error) {
 	digest := sha256.Sum256(data)
