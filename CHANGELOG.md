@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **End-to-end test for the LuCI integration.** `TestLuCIWorkflowE2E` boots a
+  real OpenWrt userland with the built `meshd` + `luci-app-meshd` packages and
+  the full LuCI stack (ubusd + rpcd + uhttpd), then drives the operator
+  workflows over the authenticated `/ubus` endpoint exactly as the PWA does:
+  the ACL gate, node enrollment + adopt, the Home/profile lifecycle, and a
+  wireless client device surfacing through the topology read. Runs in the `e2e`
+  CI job; see [doc/luci-integration-testing.md](doc/luci-integration-testing.md).
+
 ### Fixed
 - **Creating a Home through the setup wizard failed with ubus error 5.**
   Selecting a freshly created Home applied its (non-existent) profile, and the
