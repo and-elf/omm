@@ -76,8 +76,13 @@ server), so the ubus surface and its ACL stay in sync.
 ## Packaging
 
 - **Prebuilt packages** for direct download are produced by the release
-  workflow from [`scripts/package-ipk.sh`](../scripts/package-ipk.sh) and
-  [`scripts/package-apk.sh`](../scripts/package-apk.sh); see
+  workflow: the `meshd` daemon (per arch) from
+  [`scripts/package-ipk.sh`](../scripts/package-ipk.sh) /
+  [`scripts/package-apk.sh`](../scripts/package-apk.sh), and the
+  architecture-independent `luci-app-meshd` from
+  [`scripts/package-luci-ipk.sh`](../scripts/package-luci-ipk.sh). All are
+  attached to the GitHub Release and listed in the feed index, so
+  `opkg install meshd luci-app-meshd` works from the release feed. See
   [Releases & Installation](../README.md#releases--installation).
 - **Feed packages** for the official OpenWrt / LuCI feeds are described by
   `Makefile`s — [`package/meshd/Makefile`](../package/meshd/Makefile) (the

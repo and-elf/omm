@@ -130,6 +130,11 @@ jobs:
           pattern: packages-*
           path: dist
           merge-multiple: true
+      - name: Package luci-app-meshd
+        # Architecture-independent (all), built once here rather than per-arch.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}" ./scripts/package-luci-ipk.sh
+          cp build/luci-ipk/*.ipk dist/
       - name: Build opkg feed index
         # Lets users add the release as a feed instead of downloading each .ipk:
         #   src/gz omm https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}

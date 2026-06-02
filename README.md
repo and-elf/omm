@@ -101,7 +101,7 @@ the release as a feed and let `opkg` pick the matching arch and resolve updates:
 ```sh
 echo 'src/gz omm https://github.com/and-elf/omm/releases/download/v0.2.0' >> /etc/opkg/customfeeds.conf
 opkg update
-opkg install meshd
+opkg install meshd luci-app-meshd   # luci-app-meshd is optional (LuCI UI)
 ```
 
 If the release was signed (a `Packages.sig` asset is present), trust the feed's
