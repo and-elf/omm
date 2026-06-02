@@ -134,11 +134,38 @@ func main() {
 		}),
 	}
 
+	// Combined mode (MESHD_HTTP_ADDR set) serves both planes on one address over
+	// plain HTTP. Split mode binds the management plane (admin/UI) and the mesh
+	// control plane (node-to-node) separately, and the mesh plane runs mutual
+	// TLS rooted in the Home CA.
+	var servers []*http.Server
+	scheme := "http"
+	if cfg.Combined() {
+		servers = []*http.Server{{Addr: cfg.HTTPAddr, Handler: api.NewRouter(store, profileManager, apiOpts...)}}
+	} else {
+		// Issue this controller a server leaf from its Home CA for the mesh
+		// listener, and require verified client certs on post-enrollment routes.
+		serverLeaf, err := homeCA.IssueCert(id.PublicKeyDER())
+		if err != nil {
+			log.Fatalf("issue mesh server certificate: %v", err)
+		}
+		meshTLS, err := identity.ServerTLSConfig(serverLeaf, id.PrivateKeyPEM(), caCertPEM)
+		if err != nil {
+			log.Fatalf("mesh tls config: %v", err)
+		}
+		meshOpts := append(append([]api.Option{}, apiOpts...), api.WithMeshClientAuth())
+		servers = []*http.Server{
+			{Addr: cfg.MgmtAddr, Handler: api.NewManagementRouter(store, profileManager, apiOpts...)},
+			{Addr: cfg.MeshAddr, Handler: api.NewMeshRouter(store, profileManager, meshOpts...), TLSConfig: meshTLS},
+		}
+		scheme = "https"
+	}
+
 	// Announce this controller's presence for discovery. Nodes reach the mesh
 	// control plane at the announced address, so it must be the mesh-facing one.
 	apiURL := cfg.APIAdvertise
 	if apiURL == "" {
-		apiURL = "http://" + cfg.AnnounceAddr()
+		apiURL = scheme + "://" + cfg.AnnounceAddr()
 	}
 	go func() {
 		ann := discovery.Announcement{HomeID: cfg.HomeID, Name: cfg.HomeName, ControllerID: cfg.ControllerID, API: apiURL}
@@ -147,24 +174,18 @@ func main() {
 		}
 	}()
 
-	// Combined mode (MESHD_HTTP_ADDR set) serves both planes on one address.
-	// Otherwise the management plane (admin/UI) and the mesh control plane
-	// (node-to-node) bind separately so the former can be kept off the network.
-	var servers []*http.Server
-	if cfg.Combined() {
-		servers = []*http.Server{{Addr: cfg.HTTPAddr, Handler: api.NewRouter(store, profileManager, apiOpts...)}}
-	} else {
-		servers = []*http.Server{
-			{Addr: cfg.MgmtAddr, Handler: api.NewManagementRouter(store, profileManager, apiOpts...)},
-			{Addr: cfg.MeshAddr, Handler: api.NewMeshRouter(store, profileManager, apiOpts...)},
-		}
-	}
 	log.Printf("meshd up node_id=%s home=%s combined=%v auto_adopt=%v", id.NodeID(), cfg.HomeID, cfg.Combined(), cfg.AutoAdopt)
 	for _, srv := range servers {
 		srv := srv
 		go func() {
-			log.Printf("serving on %s", srv.Addr)
-			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("serving on %s (tls=%v)", srv.Addr, srv.TLSConfig != nil)
+			var err error
+			if srv.TLSConfig != nil {
+				err = srv.ListenAndServeTLS("", "")
+			} else {
+				err = srv.ListenAndServe()
+			}
+			if err != nil && err != http.ErrServerClosed {
 				log.Fatalf("server %s failed: %v", srv.Addr, err)
 			}
 		}()

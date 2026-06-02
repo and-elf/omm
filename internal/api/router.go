@@ -30,6 +30,7 @@ type apiHandler struct {
 	topoAgg        *topology.Aggregator
 	signals        SignalSource
 	scan           Scanner
+	meshClientAuth bool
 }
 
 // Scanner discovers nearby controllers (announced Homes) so the UI can present
@@ -85,6 +86,29 @@ func WithSignalSource(src SignalSource) Option {
 // WithScanner enables GET /scan, which discovers nearby controllers.
 func WithScanner(scan Scanner) Option {
 	return func(h *apiHandler) { h.scan = scan }
+}
+
+// WithMeshClientAuth requires a verified mesh client certificate on the mesh
+// router's post-enrollment routes (everything except the bootstrap /enroll/*
+// endpoints, which a node reaches before it has a cert). Set this only when the
+// mesh listener actually serves mutual TLS.
+func WithMeshClientAuth() Option {
+	return func(h *apiHandler) { h.meshClientAuth = true }
+}
+
+// protected wraps a handler so it requires a verified mesh client certificate
+// when mesh client-auth is enabled; otherwise it is a no-op.
+func (h *apiHandler) protected(next http.HandlerFunc) http.HandlerFunc {
+	if !h.meshClientAuth {
+		return next
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS == nil || len(r.TLS.VerifiedChains) == 0 {
+			respondError(w, http.StatusUnauthorized, fmt.Errorf("mesh: client certificate required"))
+			return
+		}
+		next(w, r)
+	}
 }
 
 type statusResponse struct {
@@ -153,10 +177,13 @@ func NewMeshRouter(store storage.Store, profileManager profiles.ProfileManager, 
 // registerMeshRoutes registers the endpoints remote nodes call: enrollment
 // (inbound), topology reporting, joined-Home metadata, and health.
 func (h *apiHandler) registerMeshRoutes(r chi.Router) {
-	r.Get("/health", healthHandler)
-	r.Get("/homes/{homeID}", h.getHome) // nodes fetch joined-Home metadata
+	r.Get("/health", healthHandler) // liveness, unauthenticated
+	// Post-enrollment endpoints require a verified client cert (when mesh
+	// client-auth is on); the bootstrap /enroll/* endpoints do not, since a
+	// node reaches them before it has one.
+	r.Get("/homes/{homeID}", h.protected(h.getHome)) // nodes fetch joined-Home metadata
 	if h.topology != nil {
-		r.Post("/topology/report", h.reportTopology)
+		r.Post("/topology/report", h.protected(h.reportTopology))
 	}
 	if h.enrollment != nil {
 		r.Post("/enroll/request", h.enrollRequest)
