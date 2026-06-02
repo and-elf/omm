@@ -107,20 +107,48 @@ server), so the ubus surface and its ACL stay in sync.
   e.g. a `gh-pages` branch aggregating versions — would let `opkg update` track
   new releases without editing `customfeeds.conf`.
 
-### Enabling signed feeds (maintainer)
+### Enabling signed feeds (maintainer, one-time)
 
-One-time setup with the [usign](https://github.com/openwrt/usign) tool:
+The release workflow already signs the feed index *when* a key is configured;
+this is the one-time setup to provide it.
+
+1. **Generate the keypair** with [`scripts/gen-feed-key.sh`](../scripts/gen-feed-key.sh)
+   (uses local `usign`, or generates inside an OpenWrt container):
+
+   ```sh
+   ./scripts/gen-feed-key.sh        # writes omm-feed.sec (secret) + omm-feed.pub
+   ```
+
+2. **Store the secret key** as the `OPKG_SIGN_KEY` Actions secret — never commit
+   it; keep an offline backup:
+
+   ```sh
+   gh secret set OPKG_SIGN_KEY < omm-feed.sec
+   rm omm-feed.sec                  # after backing it up
+   ```
+
+3. **Commit the public key** so the release workflow publishes it as an asset:
+
+   ```sh
+   cp omm-feed.pub package/omm-feed.pub
+   git add package/omm-feed.pub && git commit -m "chore: add feed signing public key"
+   ```
+
+From then on every release signs `Packages` (→ `Packages.sig`) and attaches
+`omm-feed.pub`. The signing is also exercised independently of opkg by
+[`scripts/verify-luci-ubus.sh`](../scripts/verify-luci-ubus.sh)'s sibling check:
+`usign -G`/`-S`/`-V` round-trips and a tampered index is rejected.
+
+### Trusting the feed (device, one-time)
 
 ```sh
-usign -G -s omm-feed.sec -p omm-feed.pub    # generate the keypair
+# fetch the published public key, then trust it
+wget https://github.com/and-elf/omm/releases/download/<tag>/omm-feed.pub
+opkg-key add omm-feed.pub
+echo 'src/gz omm https://github.com/and-elf/omm/releases/download/<tag>' >> /etc/opkg/customfeeds.conf
+opkg update            # now signature-verified
 ```
 
-1. Store the **secret** key (`omm-feed.sec` contents, both lines) as the
-   `OPKG_SIGN_KEY` Actions secret. Never commit it.
-2. Publish the **public** key (`omm-feed.pub`) — e.g. as a release asset or in
-   the repo — so devices can `opkg-key add omm-feed.pub` to trust the feed.
-3. Future releases are signed automatically.
-
-> Bootstrapping note: to install from a *signed* feed a device must already
-> trust the key, so add it with `opkg-key add` (or bake it into the firmware
-> image) before the first `opkg update`.
+> Bootstrapping note: a device must trust the key (`opkg-key add`, or bake the
+> key into the firmware image) **before** the first `opkg update`, since the
+> index it downloads is what the signature protects.

@@ -166,6 +166,8 @@ jobs:
           assets=$(find dist -type f \( -name '*.ipk' -o -name '*.apk' \))
           assets="$assets dist/Packages dist/Packages.gz"
           [ -f dist/Packages.sig ] && assets="$assets dist/Packages.sig"
+          # Publish the feed's public key so devices can trust it (opkg-key add).
+          [ -f package/omm-feed.pub ] && assets="$assets package/omm-feed.pub"
           echo "Attaching:"; echo "$assets"
           # Idempotent: re-running the workflow (or re-pushing the tag) must not
           # fail just because a release for this tag already exists. Create it
