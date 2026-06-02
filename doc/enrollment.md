@@ -47,8 +47,12 @@ The controller announces itself periodically over UDP broadcast on
 ```
 
 A client listens for announcements and learns the controller's HTTP `api`
-endpoint. (mDNS `_mesh._tcp` discovery is supported in parallel and resolves to
-the same endpoint; UDP is the baseline used by the e2e tests.)
+endpoint. When the announced `api` host is unspecified (`0.0.0.0`) — the usual
+case, since a controller announces its bind address — the listener substitutes
+the UDP packet's source address, so the client gets a dialable URL without the
+controller knowing its own routable IP. (mDNS `_mesh._tcp` discovery is
+supported in parallel and resolves to the same endpoint; UDP is the baseline
+used by the e2e tests.)
 
 ## Enrollment (HTTP)
 

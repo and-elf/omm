@@ -28,9 +28,22 @@ Controller broadcasts:
 {
   "home_id": "8f53dc9e",
   "name": "Home",
-  "controller_id": "gw01"
+  "controller_id": "gw01",
+  "api": "https://0.0.0.0:8081"
 }
 ```
+
+The `api` field tells joiners where to reach the controller's mesh control
+plane. A controller announces its *bind* address, which is usually the
+unspecified `0.0.0.0`; the listener fills the real host from the **UDP packet's
+source address**, so a joiner gets a dialable URL with **no per-device
+configuration**. (Set `MESHD_API_ADVERTISE` to override with an explicit URL.)
+
+Because UDP broadcast is confined to a single L2 segment, this zero-config
+discovery works between devices on the same bridged LAN — e.g. a wired
+controller (even one with no radios, such as a Raspberry Pi) and a wifi AP
+plugged into the same network. Across a router, use an explicit join URL
+(`MESHD_JOIN` / the enrollment UI).
 
 ---
 
