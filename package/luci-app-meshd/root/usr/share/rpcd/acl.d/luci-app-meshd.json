@@ -5,24 +5,33 @@
 			"ubus": {
 				"meshd": [
 					"status",
+					"topology",
 					"setup",
 					"homes",
+					"get_home",
+					"get_profile",
 					"nodes",
-					"topology",
+					"get_node",
+					"active_home",
 					"home_selection",
-					"scan",
-					"active_home"
+					"enrollments",
+					"scan"
 				]
 			}
 		},
 		"write": {
 			"ubus": {
 				"meshd": [
-					"set_active_home",
+					"complete_setup",
 					"create_home",
+					"update_home",
+					"save_profile",
+					"adopt_node",
+					"reject_node",
+					"set_active_home",
+					"join_home",
 					"delete_home",
 					"delete_node",
-					"complete_setup",
 					"reset"
 				]
 			}

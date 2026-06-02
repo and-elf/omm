@@ -33,6 +33,7 @@ const dec = decodeURIComponent
 // /homes/{id}/profile matches before /homes/{id}.
 const ROUTES: Route[] = [
   { method: 'GET', re: /^\/status$/, ubus: 'status' },
+  { method: 'GET', re: /^\/topology$/, ubus: 'topology' },
   { method: 'GET', re: /^\/setup$/, ubus: 'setup' },
   { method: 'POST', re: /^\/setup\/complete$/, ubus: 'complete_setup' },
   { method: 'GET', re: /^\/homes$/, ubus: 'homes' },
