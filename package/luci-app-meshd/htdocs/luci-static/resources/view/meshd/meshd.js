@@ -2,22 +2,23 @@
 'require view';
 
 /*
- * Hosts the meshd PWA inside LuCI. The PWA is embedded in the meshd binary and
- * served on the daemon's HTTP port (default 8080) on the same host, so we frame
- * it from there. This is the "LuCI app first" step: the rpcd `meshd` object
- * (see /usr/libexec/rpcd/meshd) and its ACL are in place so a future
- * LuCI-native view — or the PWA itself — can call meshd through an
- * authenticated ubus session once the management API moves behind localhost.
+ * Hosts the meshd PWA inside LuCI. The PWA is shipped as LuCI static resources
+ * (view/meshd/pwa/) and served by uhttpd at the LuCI origin, so it works even
+ * when meshd's management API is bound to localhost. We hand LuCI's session
+ * token to the embedded app via the iframe URL hash; the PWA reads it and talks
+ * to meshd through LuCI's authenticated /ubus endpoint (see web/src/api/ubus.ts
+ * and the `meshd` rpcd object). Built with relative asset paths (vite base
+ * './'), so serving from this subpath needs no separate build.
  */
 return view.extend({
-	// Pure embed view: no config to load or save.
-	load: function() { return Promise.resolve(); },
+	load: function () { return Promise.resolve(); },
 	handleSaveApply: null,
 	handleSave: null,
 	handleReset: null,
 
-	render: function() {
-		var src = window.location.protocol + '//' + window.location.hostname + ':8080/';
+	render: function () {
+		var token = (L && L.env && L.env.token) ? L.env.token : '';
+		var src = L.resource('view/meshd/pwa/index.html') + '#ubus_token=' + encodeURIComponent(token);
 		return E('iframe', {
 			'src': src,
 			'style': 'width:100%;height:80vh;border:0;background:#fff'

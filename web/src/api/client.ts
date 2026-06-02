@@ -179,13 +179,25 @@ declare global {
   }
 }
 
+// ubusContext returns the LuCI ubus session when the PWA runs inside LuCI. The
+// token arrives either as a pre-set global (__MESHD_UBUS__) or in the iframe
+// URL hash (#ubus_token=…), which is how the LuCI view hands LuCI's session
+// token to the embedded PWA.
+function ubusContext(): { token: string; endpoint?: string } | undefined {
+  if (typeof window === 'undefined') return undefined
+  if (window.__MESHD_UBUS__?.token) return window.__MESHD_UBUS__
+  const m = window.location?.hash?.match(/(?:^#|&)ubus_token=([^&]+)/)
+  if (m) return { token: decodeURIComponent(m[1]) }
+  return undefined
+}
+
 /**
  * Builds the shared client: a ubus-backed client when running inside LuCI
  * (a session token is injected), otherwise a same-origin REST client (the
  * standalone PWA served by meshd directly).
  */
 export function createApi(): ApiClient {
-  const ubus = typeof window !== 'undefined' ? window.__MESHD_UBUS__ : undefined
+  const ubus = ubusContext()
   if (ubus?.token) {
     return new ApiClient('', createUbusFetch({ token: ubus.token, endpoint: ubus.endpoint }))
   }

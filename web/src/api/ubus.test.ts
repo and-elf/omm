@@ -100,4 +100,16 @@ describe('createApi', () => {
 
     expect(raw).toHaveBeenCalledWith('/status', expect.any(Object))
   })
+
+  it('reads the session token from the iframe URL hash', async () => {
+    window.location.hash = '#ubus_token=hash-sess&v=1'
+    const raw = vi.fn().mockResolvedValue(ubusEnvelope({ status: 'ready' }))
+    vi.stubGlobal('fetch', raw)
+
+    await createApi().getStatus()
+
+    expect(raw).toHaveBeenCalledWith('/ubus', expect.any(Object))
+    expect(JSON.parse(raw.mock.calls[0][1].body).params[0]).toBe('hash-sess')
+    window.location.hash = ''
+  })
 })

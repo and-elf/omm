@@ -130,6 +130,12 @@ jobs:
           pattern: packages-*
           path: dist
           merge-multiple: true
+      - name: Restore built frontend
+        # luci-app-meshd bundles the PWA, so it needs the built web/dist.
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
       - name: Package luci-app-meshd
         # Architecture-independent (all), built once here rather than per-arch.
         run: |

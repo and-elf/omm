@@ -26,6 +26,17 @@ install -m 0644 "$src/root/usr/share/rpcd/acl.d/luci-app-meshd.json" "$pkgdir/us
 install -m 0644 "$src/root/usr/share/luci/menu.d/luci-app-meshd.json" "$pkgdir/usr/share/luci/menu.d/luci-app-meshd.json"
 install -m 0644 "$src/htdocs/luci-static/resources/view/meshd/meshd.js" "$pkgdir/www/luci-static/resources/view/meshd/meshd.js"
 
+# Bundle the built PWA so LuCI serves it locally (the view iframes it). The
+# PWA is built with relative asset paths, so it works from this subpath. The
+# release builds web/dist first; locally it uses whatever is in web/dist.
+pwadir="$pkgdir/www/luci-static/resources/view/meshd/pwa"
+if [ -f web/dist/index.html ]; then
+	mkdir -p "$pwadir"
+	tar -C web/dist --exclude=.gitkeep -cf - . | tar -C "$pwadir" -xf -
+else
+	echo "WARNING: web/dist/index.html missing; LuCI app will ship without the PWA (run web build first)" >&2
+fi
+
 cat > "$controldir/control" <<EOF
 Package: $pkgname
 Version: $version
