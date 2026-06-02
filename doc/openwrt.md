@@ -49,7 +49,15 @@ Lives under [`package/luci-app-meshd/`](../package/luci-app-meshd/):
   proxy to meshd's local HTTP API.
 - **ACL** (`/usr/share/rpcd/acl.d/luci-app-meshd.json`) — grants the LuCI app
   read access to the query methods and write access to the mutations.
-- **menu + view** — an `admin/network/meshd` entry hosting the embedded PWA.
+- **menu + view + PWA** — an `admin/network/meshd` entry whose view iframes the
+  PWA, which is shipped as LuCI static resources (`view/meshd/pwa/`) and served
+  by uhttpd. The view passes LuCI's session token via the iframe URL hash; the
+  PWA reads it and talks to meshd through LuCI's authenticated `/ubus`, so it
+  works even when meshd's management API is localhost-bound.
+- **uci-defaults** (`/etc/uci-defaults/99-luci-app-meshd`) — on install, flips a
+  still-default (combined) meshd to the secure posture: management on localhost,
+  mesh control plane network-facing with mutual TLS. Bare `meshd` (no LuCI) is
+  left in combined mode so it stays remotely manageable.
 
 The plugin's request/response contract is exercised by tests in
 [`internal/luci`](../internal/luci) (the script is run against a stub meshd
@@ -63,15 +71,15 @@ server), so the ubus surface and its ACL stay in sync.
    network): secured by **mutual TLS** rooted in a per-Home CA (implemented; see
    the [Security Model](security.md)), independent of LuCI.
 
-> **Status.** The plane split and mesh-plane mutual TLS both exist: in split
-> mode the mesh listener serves mTLS and rejects uncertified clients on
-> post-enrollment routes, and the management API *can* bind to localhost. What
-> remains is making localhost the *default* — the shipped config still runs
-> combined mode and the LuCI view iframes the PWA (which only works while
-> management is network-reachable). That flip depends on the LuCI-native ubus UI
-> (so the browser reaches management through LuCI's authenticated session rather
-> than a direct port). Until then the LuCI ACL gate is real but not the *only*
-> door to management.
+> **Status.** Complete. Bare `meshd` defaults to combined mode (single port,
+> network-reachable PWA) so a headless node stays manageable. Installing
+> `luci-app-meshd` flips the device (via uci-defaults) to **split + localhost
+> management + mesh mutual-TLS**, and serves the PWA through LuCI's
+> authenticated `/ubus` — so management is no longer reachable on the network,
+> only through the LuCI session. The on-device browser behaviour (SPA in the
+> iframe) is the one part not covered by automated tests; the static serving,
+> the `/ubus` ACL path, the cert/mTLS layer and the config flip are all
+> verified (unit + integration + real-OpenWrt container).
 
 ## Packaging
 

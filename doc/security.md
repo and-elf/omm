@@ -29,9 +29,10 @@ auto-adopt for tests).
 
 ## Management plane (admin ↔ device)
 
-The management API is intended to bind to **localhost** and be reached only
-through LuCI's authenticated session (the `meshd` rpcd object) — see
-[OpenWrt Integration](openwrt.md). The listener split is in place; making
-localhost the default depends on the LuCI-native UI.
+The management API binds to **localhost** and is reached only through LuCI's
+authenticated session (the `meshd` rpcd object + ACL), with the PWA served by
+LuCI and talking to meshd over `/ubus` — see [OpenWrt Integration](openwrt.md).
+Installing `luci-app-meshd` switches the device into this posture; a bare
+`meshd` stays in combined mode so a headless node remains remotely manageable.
 
 No cloud authentication exists; trust is entirely Home-based and local.

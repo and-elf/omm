@@ -1,0 +1,20 @@
+#!/bin/sh
+# Runs once when luci-app-meshd is installed (or on first boot in an image).
+# LuCI is now present to provide an authenticated, gated management UI, so
+# switch meshd to the secure posture: management bound to localhost (reached
+# through LuCI's /ubus) and the mesh control plane network-facing with mutual
+# TLS. Removing http_addr selects split mode; meshd derives mesh TLS from it.
+#
+# Only applies to a config still in the default combined mode, so an operator
+# who deliberately set http_addr/mgmt_addr is left untouched.
+[ "$(uci -q get meshd.main.http_addr)" = "0.0.0.0:8080" ] || exit 0
+
+uci -q batch <<'EOF'
+delete meshd.main.http_addr
+set meshd.main.mgmt_addr=127.0.0.1:8080
+set meshd.main.mesh_addr=0.0.0.0:8081
+EOF
+uci commit meshd
+
+/etc/init.d/meshd restart 2>/dev/null || true
+exit 0

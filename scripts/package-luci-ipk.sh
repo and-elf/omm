@@ -18,12 +18,14 @@ mkdir -p "$controldir" \
 	"$pkgdir/usr/libexec/rpcd" \
 	"$pkgdir/usr/share/rpcd/acl.d" \
 	"$pkgdir/usr/share/luci/menu.d" \
+	"$pkgdir/etc/uci-defaults" \
 	"$pkgdir/www/luci-static/resources/view/meshd"
 
 # htdocs/ maps to /www/ on the device (the LuCI convention).
 install -m 0755 "$src/root/usr/libexec/rpcd/meshd" "$pkgdir/usr/libexec/rpcd/meshd"
 install -m 0644 "$src/root/usr/share/rpcd/acl.d/luci-app-meshd.json" "$pkgdir/usr/share/rpcd/acl.d/luci-app-meshd.json"
 install -m 0644 "$src/root/usr/share/luci/menu.d/luci-app-meshd.json" "$pkgdir/usr/share/luci/menu.d/luci-app-meshd.json"
+install -m 0755 "$src/root/etc/uci-defaults/99-luci-app-meshd" "$pkgdir/etc/uci-defaults/99-luci-app-meshd"
 install -m 0644 "$src/htdocs/luci-static/resources/view/meshd/meshd.js" "$pkgdir/www/luci-static/resources/view/meshd/meshd.js"
 
 # Bundle the built PWA so LuCI serves it locally (the view iframes it). The
@@ -46,10 +48,14 @@ Depends: meshd, curl
 Description: LuCI support for OpenWrt Mesh Manager (meshd)
 EOF
 
-# Re-register the rpcd object/ACL and drop the LuCI menu cache on install.
+# Apply the uci-defaults (secure posture) immediately on a live install,
+# re-register the rpcd object/ACL, and drop the LuCI menu cache.
 cat > "$controldir/postinst" <<'EOF'
 #!/bin/sh
 [ -n "${IPKG_INSTROOT}" ] && exit 0
+if [ -f /etc/uci-defaults/99-luci-app-meshd ]; then
+	( . /etc/uci-defaults/99-luci-app-meshd ) && rm -f /etc/uci-defaults/99-luci-app-meshd
+fi
 rm -f /tmp/luci-indexcache* 2>/dev/null
 rm -rf /tmp/luci-modulecache 2>/dev/null
 /etc/init.d/rpcd reload 2>/dev/null || true
