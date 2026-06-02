@@ -2,8 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
+
+	"github.com/and-elf/omm/internal/storage"
 )
 
 type activeHomeResponse struct {
@@ -48,11 +52,17 @@ func (h *apiHandler) setActiveHome(w http.ResponseWriter, r *http.Request) {
 
 	// Selecting a Home is only meaningful if its profile is pushed to UCI —
 	// this is what lets a portable node move between Homes without a factory
-	// reset (see doc/profiles.md "Profile Switching").
+	// reset (see doc/profiles.md "Profile Switching"). A freshly created Home
+	// has no profile yet, so a missing profile is not an error: skip the push
+	// (there is nothing to apply) and still report the selection as successful,
+	// mirroring meshd's auto-select. Any other apply error is fatal.
 	if h.profileManager != nil {
 		if err := h.profileManager.ApplyProfileForHome(r.Context(), req.HomeID); err != nil {
-			respondError(w, http.StatusInternalServerError, fmt.Errorf("apply profile: %w", err))
-			return
+			if !errors.Is(err, storage.ErrNotFound) {
+				respondError(w, http.StatusInternalServerError, fmt.Errorf("apply profile: %w", err))
+				return
+			}
+			log.Printf("set active home %s: no profile to apply yet (non-fatal)", req.HomeID)
 		}
 	}
 
