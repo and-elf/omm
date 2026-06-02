@@ -62,6 +62,9 @@ type Client struct {
 // returns the final result. It is a convenience wrapper around New + Enroll for
 // callers (such as the /enroll/join endpoint) that enroll on demand.
 func Join(ctx context.Context, id *identity.Identity, controllerURL, serial string, opts Options) (enrollment.Result, error) {
+	if opts.HTTPClient == nil {
+		opts.HTTPClient = BootstrapClient(controllerURL, 0)
+	}
 	return New(id, controllerURL, opts).Enroll(ctx, serial)
 }
 
@@ -71,21 +74,65 @@ type HomeRecorder interface {
 	UpsertHome(ctx context.Context, home models.Home) error
 }
 
+// BootstrapClient is the transport for the enrollment exchange. Against an
+// https controller it encrypts but does not verify the server (TOFU — the node
+// has not yet pinned the Home CA); against http it is a plain client.
+func BootstrapClient(controllerURL string, timeout time.Duration) *http.Client {
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+	if strings.HasPrefix(controllerURL, "https://") {
+		return &http.Client{Timeout: timeout, Transport: &http.Transport{TLSClientConfig: identity.InsecureClientTLSConfig()}}
+	}
+	return &http.Client{Timeout: timeout}
+}
+
+// AuthenticatedClient builds the mesh transport for post-enrollment calls: it
+// verifies the controller against the pinned Home CA and presents the node's
+// issued leaf (paired with the device key) for mutual TLS.
+func AuthenticatedClient(id *identity.Identity, leafPEM, caPEM []byte, timeout time.Duration) (*http.Client, error) {
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+	cfg, err := identity.ClientTLSConfig(leafPEM, id.PrivateKeyPEM(), caPEM)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{Timeout: timeout, Transport: &http.Transport{TLSClientConfig: cfg}}, nil
+}
+
 // JoinAndRecord enrolls into a controller and records the joined Home locally
 // as a membership (id, name, controller), stamped with the join time. This is
-// what lets a multi-home device choose between Homes on boot.
+// what lets a multi-home device choose between Homes on boot. The enrollment
+// exchange uses the bootstrap transport; once the controller has issued a leaf
+// and returned the Home CA, the protected RemoteHome call switches to mutual
+// TLS verified against that CA.
 func JoinAndRecord(ctx context.Context, id *identity.Identity, controllerURL, serial string, recorder HomeRecorder, opts Options) (enrollment.Result, error) {
+	if opts.HTTPClient == nil {
+		opts.HTTPClient = BootstrapClient(controllerURL, 0)
+	}
 	c := New(id, controllerURL, opts)
 	result, err := c.Enroll(ctx, serial)
 	if err != nil {
 		return result, err
 	}
 	if recorder != nil && result.HomeID != "" {
-		if home, herr := c.RemoteHome(ctx, result.HomeID); herr == nil {
+		// Use the issued leaf + pinned CA for the protected GET /homes/{id}.
+		rc := c
+		if len(result.Certificate) > 0 && len(result.CACertificate) > 0 && strings.HasPrefix(controllerURL, "https://") {
+			if ac, aerr := AuthenticatedClient(id, result.Certificate, result.CACertificate, 0); aerr == nil {
+				rc = New(id, controllerURL, Options{HTTPClient: ac, PollInterval: opts.PollInterval})
+			}
+		}
+		if home, herr := rc.RemoteHome(ctx, result.HomeID); herr == nil {
 			if home.ID == "" {
 				home.ID = result.HomeID
 			}
 			home.LastSeen = time.Now().Unix()
+			// Pin the Home CA even if the controller omitted it from the record.
+			if len(home.Certificate) == 0 {
+				home.Certificate = result.CACertificate
+			}
 			_ = recorder.UpsertHome(ctx, home)
 		}
 	}

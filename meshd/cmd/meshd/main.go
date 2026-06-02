@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -202,12 +203,15 @@ func main() {
 	} else {
 		// Joining devices: wait to record the joined Home(s) before selecting,
 		// so an external Home can win over the device's own (last-resort) Home.
+		// joinHome records each controller's authenticated mesh client here for
+		// the topology loop to reuse.
+		meshClients := &controllerClients{}
 		for _, controllerURL := range cfg.Join {
-			go joinHome(ctx, id, cfg.Serial, controllerURL, store, profileManager, autoSelect)
+			go joinHome(ctx, id, cfg.Serial, controllerURL, store, profileManager, meshClients, autoSelect)
 		}
 		// Push this node's local topology to its controllers for mesh-wide
 		// aggregation.
-		go reportTopologyLoop(ctx, collector, id.NodeID(), cfg.Join, 15*time.Second)
+		go reportTopologyLoop(ctx, collector, id.NodeID(), cfg.Join, meshClients, 15*time.Second)
 	}
 
 	<-ctx.Done()
@@ -272,14 +276,43 @@ func autoSelectHome(ctx context.Context, store storage.Store, pm profiles.Profil
 
 // reportTopologyLoop periodically pushes this node's local topology to its
 // controllers so they can build a mesh-wide view.
-func reportTopologyLoop(ctx context.Context, collector *topology.Collector, nodeID string, controllers []string, interval time.Duration) {
-	httpClient := &http.Client{Timeout: 10 * time.Second}
+// controllerClients holds the authenticated mesh HTTP client for each joined
+// controller. joinHome populates it after a successful join; the topology loop
+// reads it so its reports go over the same mutual-TLS transport.
+type controllerClients struct {
+	mu sync.Mutex
+	m  map[string]*http.Client
+}
+
+func (c *controllerClients) set(url string, hc *http.Client) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = map[string]*http.Client{}
+	}
+	c.m[url] = hc
+}
+
+func (c *controllerClients) get(url string) *http.Client {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.m[url]
+}
+
+func reportTopologyLoop(ctx context.Context, collector *topology.Collector, nodeID string, controllers []string, clients *controllerClients, interval time.Duration) {
+	plain := &http.Client{Timeout: 10 * time.Second}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		graph := collector.Collect(ctx)
 		for _, controllerURL := range controllers {
+			// Prefer the authenticated client recorded at join; fall back to a
+			// plain client (combined-mode/http controllers) until one is set.
+			httpClient := clients.get(controllerURL)
+			if httpClient == nil {
+				httpClient = plain
+			}
 			if err := client.ReportTopology(ctx, controllerURL, nodeID, graph, httpClient); err != nil {
 				log.Printf("topology report to %s failed: %v", controllerURL, err)
 			}
@@ -294,12 +327,19 @@ func reportTopologyLoop(ctx context.Context, collector *topology.Collector, node
 
 // joinHome enrolls this device into another controller, retrying until it
 // succeeds or the daemon stops.
-func joinHome(ctx context.Context, id *identity.Identity, serial, controllerURL string, store storage.Store, pm profiles.ProfileManager, afterJoin func()) {
+func joinHome(ctx context.Context, id *identity.Identity, serial, controllerURL string, store storage.Store, pm profiles.ProfileManager, clients *controllerClients, afterJoin func()) {
 	const retry = 3 * time.Second
 	for {
 		result, err := client.JoinAndRecord(ctx, id, controllerURL, serial, store, client.Options{})
 		if err == nil {
 			log.Printf("joined controller %s status=%s", controllerURL, result.Status)
+			// Record the authenticated mesh transport so topology reports to
+			// this controller go over mutual TLS with the issued leaf.
+			if clients != nil && len(result.Certificate) > 0 && len(result.CACertificate) > 0 {
+				if ac, aerr := client.AuthenticatedClient(id, result.Certificate, result.CACertificate, 10*time.Second); aerr == nil {
+					clients.set(controllerURL, ac)
+				}
+			}
 			if result.Profile != nil {
 				if err := pm.ApplyProfile(ctx, *result.Profile); err != nil {
 					log.Printf("apply profile from %s failed: %v", controllerURL, err)
