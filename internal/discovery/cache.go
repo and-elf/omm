@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"net/url"
 	"sort"
 	"sync"
 	"time"
@@ -67,10 +68,41 @@ func (c *Cache) List() []Announcement {
 // cache until the context is cancelled. Intended to run for the daemon's
 // lifetime so /scan can answer from the cache.
 func (c *Cache) Listen(ctx context.Context, listenAddr string) error {
-	return ListenUDP(ctx, listenAddr, func(data []byte, _ *net.UDPAddr) {
+	return ListenUDP(ctx, listenAddr, func(data []byte, src *net.UDPAddr) {
 		var ann Announcement
-		if json.Unmarshal(data, &ann) == nil {
-			c.Add(ann)
+		if json.Unmarshal(data, &ann) != nil {
+			return
 		}
+		if src != nil {
+			// Controllers announce their bind address, which is often the
+			// unspecified 0.0.0.0; fill the real host from the packet source so
+			// joiners get a dialable URL without per-device configuration.
+			ann.API = fixAPIHost(ann.API, src.IP)
+		}
+		c.Add(ann)
 	})
+}
+
+// fixAPIHost replaces an unspecified host (0.0.0.0 / :: / empty) in the
+// announced API URL with src, preserving the scheme, port and path. A URL that
+// already names a concrete host is returned unchanged.
+func fixAPIHost(api string, src net.IP) string {
+	if api == "" || src == nil {
+		return api
+	}
+	u, err := url.Parse(api)
+	if err != nil {
+		return api
+	}
+	switch u.Hostname() {
+	case "", "0.0.0.0", "::":
+		if port := u.Port(); port != "" {
+			u.Host = net.JoinHostPort(src.String(), port)
+		} else {
+			u.Host = src.String()
+		}
+		return u.String()
+	default:
+		return api
+	}
 }

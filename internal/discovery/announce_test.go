@@ -38,6 +38,49 @@ func TestAnnounceDiscoverRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFixAPIHostRewritesUnspecified(t *testing.T) {
+	src := net.ParseIP("10.0.0.5")
+	cases := []struct{ in, want string }{
+		{"https://0.0.0.0:8081", "https://10.0.0.5:8081"},
+		{"http://0.0.0.0:8080/x", "http://10.0.0.5:8080/x"},
+		{"http://10.0.0.1:8080", "http://10.0.0.1:8080"}, // concrete host kept
+		{"", ""}, // empty kept
+	}
+	for _, c := range cases {
+		if got := fixAPIHost(c.in, src); got != c.want {
+			t.Errorf("fixAPIHost(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// The cache fills an unspecified announced host (0.0.0.0) from the UDP packet's
+// source address, so a controller can announce its bind port without knowing
+// its own routable IP.
+func TestCacheListenDerivesHostFromSource(t *testing.T) {
+	addr := freeUDPPort(t)
+	ann := Announcement{HomeID: "home-1", Name: "Casa", ControllerID: "gw01", API: "http://0.0.0.0:9999"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cache := NewCache(time.Minute, nil)
+	go func() { _ = cache.Listen(ctx, addr) }()
+	time.Sleep(50 * time.Millisecond)
+	go func() { _ = Announce(ctx, addr, ann, 30*time.Millisecond) }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if list := cache.List(); len(list) == 1 {
+			if list[0].API == "http://127.0.0.1:9999" {
+				return // success: host rewritten from the loopback source
+			}
+			t.Fatalf("API host not rewritten: %q", list[0].API)
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	t.Fatalf("announcement not cached: %+v", cache.List())
+}
+
 func TestCacheListenCollectsAnnouncements(t *testing.T) {
 	addr := freeUDPPort(t)
 	ann := Announcement{HomeID: "home-1", Name: "Cottage", ControllerID: "gw01", API: "http://10.0.0.1:8080"}
