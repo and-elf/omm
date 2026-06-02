@@ -104,10 +104,17 @@ opkg update
 opkg install meshd
 ```
 
-The index is not yet signed, so either add `option check_signature 0` for this
-feed or use `opkg --no-check-certificate`/`opkg install ... --nocheckhash`
-as appropriate. Feed signing (usign) and a stable rolling feed URL are planned;
-see [OpenWrt Integration & Packaging](doc/openwrt.md).
+If the release was signed (a `Packages.sig` asset is present), trust the feed's
+public key once, then `opkg update` verifies the index automatically:
+
+```sh
+opkg-key add omm-feed.pub        # the maintainer's published usign public key
+```
+
+If a release is **unsigned** (no `Packages.sig`), add `option check_signature 0`
+to that feed line instead. Generating the key and turning on signing is a
+maintainer step; see [OpenWrt Integration & Packaging](doc/openwrt.md). A stable
+rolling feed URL (vs the per-release URL above) is still planned.
 
 Build the single-binary product (frontend + daemon) locally with
 `./scripts/build.sh` — see [Architecture & Components](doc/architecture.md).

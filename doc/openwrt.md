@@ -61,13 +61,34 @@ server), so the ubus surface and its ACL stay in sync.
   needed for the direct-download packages. Bump `PKG_VERSION`/`PKG_HASH` in
   [`package/meshd/Makefile`](../package/meshd/Makefile) per release before
   submitting to a feed.
-- **opkg feed.** The release workflow also runs
+- **opkg feed.** The release workflow runs
   [`scripts/make-feed-index.sh`](../scripts/make-feed-index.sh) over the built
   `.ipk`s to publish an opkg index (`Packages`/`Packages.gz`) as release assets,
   so a release doubles as a feed (see
   [Releases & Installation](../README.md#releases--installation)).
+- **Feed signing.** When the `OPKG_SIGN_KEY` repository secret is set, the
+  workflow signs the index with usign ([`scripts/sign-feed.sh`](../scripts/sign-feed.sh))
+  and attaches `Packages.sig`, which `opkg` verifies on `opkg update`. Without
+  the secret the feed is published unsigned.
 
-  Two follow-ups: the index is **unsigned** (add usign signing + ship the public
-  key so `opkg` can verify it), and the feed URL is **per-release** (a stable
-  rolling feed — e.g. a `gh-pages` branch aggregating versions — would let
-  `opkg update` track new releases without editing `customfeeds.conf`).
+  Remaining follow-up: the feed URL is **per-release**; a stable rolling feed —
+  e.g. a `gh-pages` branch aggregating versions — would let `opkg update` track
+  new releases without editing `customfeeds.conf`.
+
+### Enabling signed feeds (maintainer)
+
+One-time setup with the [usign](https://github.com/openwrt/usign) tool:
+
+```sh
+usign -G -s omm-feed.sec -p omm-feed.pub    # generate the keypair
+```
+
+1. Store the **secret** key (`omm-feed.sec` contents, both lines) as the
+   `OPKG_SIGN_KEY` Actions secret. Never commit it.
+2. Publish the **public** key (`omm-feed.pub`) — e.g. as a release asset or in
+   the repo — so devices can `opkg-key add omm-feed.pub` to trust the feed.
+3. Future releases are signed automatically.
+
+> Bootstrapping note: to install from a *signed* feed a device must already
+> trust the key, so add it with `opkg-key add` (or bake it into the firmware
+> image) before the first `opkg update`.

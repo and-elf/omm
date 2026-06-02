@@ -134,6 +134,25 @@ jobs:
         # Lets users add the release as a feed instead of downloading each .ipk:
         #   src/gz omm https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: ./scripts/make-feed-index.sh dist
+      - name: Sign feed index
+        # Opt-in: only signs when the maintainer has stored a usign secret key
+        # in the OPKG_SIGN_KEY secret (generate with `usign -G`; see
+        # doc/openwrt.md). Without it the feed is published unsigned.
+        env:
+          OPKG_SIGN_KEY: ${{ secrets.OPKG_SIGN_KEY }}
+        run: |
+          if [ -z "${OPKG_SIGN_KEY:-}" ]; then
+            echo "OPKG_SIGN_KEY not set; publishing an unsigned feed index"
+            exit 0
+          fi
+          # usign is small and dependency-light; build it from the OpenWrt repo.
+          git clone --depth 1 https://github.com/openwrt/usign /tmp/usign
+          cmake -S /tmp/usign -B /tmp/usign/build >/dev/null
+          make -C /tmp/usign/build >/dev/null
+          umask 077
+          printf '%s\n' "$OPKG_SIGN_KEY" >/tmp/usign.key
+          USIGN=/tmp/usign/build/usign ./scripts/sign-feed.sh dist /tmp/usign.key
+          rm -f /tmp/usign.key
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -141,6 +160,7 @@ jobs:
         run: |
           assets=$(find dist -type f \( -name '*.ipk' -o -name '*.apk' \))
           assets="$assets dist/Packages dist/Packages.gz"
+          [ -f dist/Packages.sig ] && assets="$assets dist/Packages.sig"
           echo "Attaching:"; echo "$assets"
           # Idempotent: re-running the workflow (or re-pushing the tag) must not
           # fail just because a release for this tag already exists. Create it
