@@ -60,16 +60,18 @@ server), so the ubus surface and its ACL stay in sync.
 1. **Management plane** (an admin managing this device): authenticated by
    **LuCI** — the rpcd session plus the ACL above gate every `meshd` ubus call.
 2. **Mesh control plane** (node ↔ controller enrollment and topology over the
-   network): **not** covered by LuCI. This is meshd-to-meshd and needs the
-   certificate-based mutual auth described in the [Security Model](security.md).
+   network): secured by **mutual TLS** rooted in a per-Home CA (implemented; see
+   the [Security Model](security.md)), independent of LuCI.
 
-> **Status.** The plane split exists (see above) so the management API *can*
-> bind to localhost today. It is not yet the *default* (the shipped config runs
-> combined mode), and the LuCI view still iframes the PWA — which only works
-> while management is network-reachable. Making localhost the default depends on
-> the LuCI-native ubus UI (so the browser reaches management through LuCI's
-> authenticated session, not a direct port); mesh-plane mTLS is the parallel
-> next step. Until then the LuCI ACL gate is real but not yet the *only* door.
+> **Status.** The plane split and mesh-plane mutual TLS both exist: in split
+> mode the mesh listener serves mTLS and rejects uncertified clients on
+> post-enrollment routes, and the management API *can* bind to localhost. What
+> remains is making localhost the *default* — the shipped config still runs
+> combined mode and the LuCI view iframes the PWA (which only works while
+> management is network-reachable). That flip depends on the LuCI-native ubus UI
+> (so the browser reaches management through LuCI's authenticated session rather
+> than a direct port). Until then the LuCI ACL gate is real but not the *only*
+> door to management.
 
 ## Packaging
 
