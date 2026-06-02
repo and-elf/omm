@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Creating a Home through the setup wizard failed with ubus error 5.**
+  Selecting a freshly created Home applied its (non-existent) profile, and the
+  API treated the missing profile as a fatal 500 — even though meshd's own
+  auto-select already treats it as non-fatal. Selecting a Home with no profile
+  yet now succeeds; only real apply failures error.
+- **Opaque ubus error 5 from the LuCI Mesh Manager.** The rpcd plugin used
+  `curl -f`, which discarded meshd's JSON error body on any HTTP error, leaving
+  rpcd to report a bare `NO_DATA` (5). The plugin now passes meshd's
+  `{"error": …}` body back through so the PWA shows the real reason.
+
 ## [0.1.1] - 2026-06-02
 
 ### Fixed
