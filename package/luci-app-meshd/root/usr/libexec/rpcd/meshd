@@ -14,8 +14,12 @@
 
 MESHD_URL="${MESHD_URL:-http://127.0.0.1:8080}"
 
-get() { curl -fsS "$MESHD_URL$1"; }
-send() { printf '%s' "$3" | curl -fsS -X "$1" -H 'Content-Type: application/json' --data-binary @- "$MESHD_URL$2"; }
+# No -f: on an HTTP error meshd still returns a JSON `{"error": "..."}` body,
+# and we want that body to flow back to the PWA (which surfaces data.error) so
+# the user sees the real reason. With -f, curl would exit non-zero and emit
+# nothing, leaving rpcd to report a bare, meaningless ubus status (e.g. 5).
+get() { curl -sS "$MESHD_URL$1"; }
+send() { printf '%s' "$3" | curl -sS -X "$1" -H 'Content-Type: application/json' --data-binary @- "$MESHD_URL$2"; }
 
 # json_str extracts a flat string field ($1) from the JSON in $2. Deliberately
 # avoids jshn so the plugin is portable and testable off-OpenWrt; meshd only
