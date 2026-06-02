@@ -107,6 +107,28 @@ server), so the ubus surface and its ACL stay in sync.
   e.g. a `gh-pages` branch aggregating versions — would let `opkg update` track
   new releases without editing `customfeeds.conf`.
 
+### apk packages and signing (24.10+) — current limitation
+
+Everything above is the **opkg** path (`.ipk`, OpenWrt ≤23.05 and 24.10's opkg).
+The newer **apk** package manager uses an entirely separate scheme, so be aware:
+
+- The published `.apk` files are **not real apk packages** — they are a plain
+  gzip tar with a `.PKGINFO` ([`scripts/package-apk.sh`](../scripts/package-apk.sh)),
+  installed by *extracting* onto the rootfs, not via `apk add`. They are a
+  convenience for dropping the binary onto a 24.10 userland.
+- **usign signing does not apply to apk.** opkg verifies a usign-signed
+  `Packages` index against keys in `/etc/opkg/keys/`; apk verifies an
+  **RSA-signed `APKINDEX`** against keys in `/etc/apk/keys/`. The `omm-feed.pub`
+  usign key is meaningless to apk.
+- We do not publish an apk repository (`APKINDEX.tar.gz`) at all.
+
+Proper signed-apk support is future work and a distinct workstream: an RSA
+signing key, real apk package builds (OpenWrt's apk/abuild tooling, typically
+via the SDK), an RSA-signed `APKINDEX`, and shipping the RSA public key for
+`/etc/apk/keys/`. Until then, treat the `.apk` artifacts as unsigned
+extract-only convenience files; the **`.ipk` feed is the signed, verifiable
+path**.
+
 ### Enabling signed feeds (maintainer, one-time)
 
 The release workflow already signs the feed index *when* a key is configured;

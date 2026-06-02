@@ -83,15 +83,17 @@ subtargets:
 Find your device's arch and install the matching package:
 
 ```sh
-opkg print-architecture          # 23.05 and earlier
+opkg print-architecture          # find your arch
 opkg install meshd_<version>_<arch>.ipk
-
-apk info --print-arch            # 24.10+
-apk add --allow-untrusted meshd-<version>-<arch>.apk
 ```
 
 If your subtarget is not listed above, the binary is still compatible within
 its ISA group; install with `opkg install --force-architecture`.
+
+The `.apk` artifacts are an extract-onto-the-rootfs convenience for apk-based
+(24.10+) systems — `tar -C / -xzf meshd-<version>-<arch>.apk` — **not** real
+`apk add` packages, and they are unsigned. The signed, verifiable path is the
+`.ipk` feed; see [OpenWrt Integration](doc/openwrt.md) for the apk caveat.
 
 ### As an opkg feed
 
