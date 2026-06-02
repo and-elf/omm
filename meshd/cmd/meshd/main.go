@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"log"
 	"net/http"
@@ -51,25 +52,47 @@ func main() {
 	}
 	defer uciClient.Close()
 
+	// This daemon's Home CA signs a leaf certificate for each node it adopts;
+	// its certificate is the trust anchor nodes pin (TOFU) for mesh TLS.
+	homeCA, err := identity.LoadOrCreateCA(cfg.IdentityDir, "home-"+cfg.HomeID)
+	if err != nil {
+		log.Fatalf("failed to load/create Home CA: %v", err)
+	}
+	caCertPEM := homeCA.CertificatePEM()
+
 	// Ensure this daemon's own Home exists (with its mesh BSSID, so peers can
-	// map our RSSI to this Home) without clobbering an onboarding rename.
+	// map our RSSI to this Home, and the CA cert nodes fetch when joining)
+	// without clobbering an onboarding rename.
 	bssid := resolveBSSID(cfg)
 	switch home, err := store.GetHome(ctx, cfg.HomeID); {
 	case err == storage.ErrNotFound:
 		if err := store.CreateHome(ctx, models.Home{
-			ID: cfg.HomeID, Name: cfg.HomeName, Controller: cfg.ControllerID, BSSID: bssid, LastSeen: time.Now().Unix(),
+			ID: cfg.HomeID, Name: cfg.HomeName, Controller: cfg.ControllerID,
+			BSSID: bssid, Certificate: caCertPEM, LastSeen: time.Now().Unix(),
 		}); err != nil {
 			log.Printf("failed to create home: %v", err)
 		}
-	case err == nil && bssid != "" && home.BSSID != bssid:
-		home.BSSID = bssid
-		if err := store.UpdateHome(ctx, home); err != nil {
-			log.Printf("failed to update home bssid: %v", err)
+	case err == nil:
+		// Persist BSSID/CA changes via a full put so the (possibly renamed)
+		// Name and other fields are preserved.
+		changed := false
+		if bssid != "" && home.BSSID != bssid {
+			home.BSSID = bssid
+			changed = true
+		}
+		if !bytes.Equal(home.Certificate, caCertPEM) {
+			home.Certificate = caCertPEM
+			changed = true
+		}
+		if changed {
+			if err := store.CreateHome(ctx, home); err != nil {
+				log.Printf("failed to update home: %v", err)
+			}
 		}
 	}
 
 	profileManager := profiles.NewManager(store, uciClient)
-	enrollSvc := enrollment.NewService(store, enrollment.Options{HomeID: cfg.HomeID, AutoAdopt: cfg.AutoAdopt})
+	enrollSvc := enrollment.NewService(store, enrollment.Options{HomeID: cfg.HomeID, AutoAdopt: cfg.AutoAdopt, CA: homeCA})
 
 	// Topology collector: batman-adv link quality + hostapd client RSSI.
 	ubusClient, err := ubus.NewClient(ubus.Options{SocketPath: cfg.UbusSocket, BinaryPath: cfg.UbusBinary})

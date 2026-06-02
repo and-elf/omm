@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -76,6 +78,47 @@ func LoadCA(certPEM, keyPEM []byte) (*CA, error) {
 		return nil, errors.New("identity: invalid CA certificate PEM")
 	}
 	return &CA{priv: priv, certDER: certBlock.Bytes}, nil
+}
+
+const (
+	caCertFileName = "ca.pem"
+	caKeyFileName  = "ca-key.pem"
+)
+
+// Save writes the CA certificate and private key to dir (key with 0600).
+func (c *CA) Save(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create ca dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, caCertFileName), c.CertificatePEM(), 0o644); err != nil {
+		return fmt.Errorf("write ca cert: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, caKeyFileName), c.PrivateKeyPEM(), 0o600); err != nil {
+		return fmt.Errorf("write ca key: %w", err)
+	}
+	return nil
+}
+
+// LoadOrCreateCA loads the Home CA from dir, or generates and persists a new
+// one (with the given common name) if none exists.
+func LoadOrCreateCA(dir, commonName string) (*CA, error) {
+	certPEM, certErr := os.ReadFile(filepath.Join(dir, caCertFileName))
+	keyPEM, keyErr := os.ReadFile(filepath.Join(dir, caKeyFileName))
+	if certErr == nil && keyErr == nil {
+		return LoadCA(certPEM, keyPEM)
+	}
+	if certErr != nil && !errors.Is(certErr, os.ErrNotExist) {
+		return nil, certErr
+	}
+
+	ca, err := GenerateCA(commonName)
+	if err != nil {
+		return nil, err
+	}
+	if err := ca.Save(dir); err != nil {
+		return nil, err
+	}
+	return ca, nil
 }
 
 // CertPool returns a pool containing just this CA, for use as RootCAs (nodes

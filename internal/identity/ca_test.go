@@ -3,6 +3,8 @@ package identity
 import (
 	"crypto/x509"
 	"encoding/pem"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -67,6 +69,40 @@ func TestCALoadRoundTrip(t *testing.T) {
 	}
 	if _, err := parseLeaf(t, leafPEM).Verify(x509.VerifyOptions{Roots: loaded.CertPool(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
 		t.Fatalf("leaf from reloaded CA does not verify: %v", err)
+	}
+}
+
+// LoadOrCreateCA generates a CA on first call and loads the same one after,
+// persisting the key with 0600 permissions.
+func TestLoadOrCreateCA(t *testing.T) {
+	dir := t.TempDir()
+
+	ca1, err := LoadOrCreateCA(dir, "home-x")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	ca2, err := LoadOrCreateCA(dir, "home-x")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if string(ca1.CertificatePEM()) != string(ca2.CertificatePEM()) {
+		t.Fatal("second call should load the same CA, not regenerate it")
+	}
+
+	// A node cert issued by the reloaded CA verifies against the original.
+	node, _ := Generate()
+	leafPEM, err := ca2.IssueCert(node.PublicKeyDER())
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if _, err := parseLeaf(t, leafPEM).Verify(x509.VerifyOptions{Roots: ca1.CertPool(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
+		t.Fatalf("leaf from reloaded CA does not verify: %v", err)
+	}
+
+	if info, err := os.Stat(filepath.Join(dir, "ca-key.pem")); err != nil {
+		t.Fatalf("stat ca key: %v", err)
+	} else if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("ca key perms = %o, want 600", perm)
 	}
 }
 

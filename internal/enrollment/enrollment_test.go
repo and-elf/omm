@@ -2,6 +2,8 @@ package enrollment_test
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"sync"
 	"testing"
@@ -45,6 +47,49 @@ func enroll(t *testing.T, svc *enrollment.Service, id *identity.Identity, serial
 		t.Fatalf("verify: %v", err)
 	}
 	return res
+}
+
+func TestEnrollmentIssuesCertificate(t *testing.T) {
+	ca, err := identity.GenerateCA("home-1")
+	if err != nil {
+		t.Fatalf("generate ca: %v", err)
+	}
+	svc := enrollment.NewService(newStore(t), enrollment.Options{HomeID: "home-1", AutoAdopt: true, CA: ca})
+	id, _ := identity.Generate()
+
+	res := enroll(t, svc, id, "SN1")
+	if res.Status != models.EnrollmentApproved {
+		t.Fatalf("status = %q, want approved", res.Status)
+	}
+	// The Home CA cert is returned so the node can pin it (TOFU).
+	if string(res.CACertificate) != string(ca.CertificatePEM()) {
+		t.Fatal("CACertificate should be the Home CA cert")
+	}
+	// The issued leaf carries the node ID and verifies against the Home CA.
+	block, _ := pem.Decode(res.Certificate)
+	if block == nil {
+		t.Fatal("expected an issued certificate")
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("parse leaf: %v", err)
+	}
+	if leaf.Subject.CommonName != id.NodeID() {
+		t.Fatalf("leaf CN = %q, want %q", leaf.Subject.CommonName, id.NodeID())
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: ca.CertPool(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
+		t.Fatalf("issued leaf does not verify against the Home CA: %v", err)
+	}
+}
+
+func TestEnrollmentWithoutCAIssuesNoCertificate(t *testing.T) {
+	svc := enrollment.NewService(newStore(t), enrollment.Options{HomeID: "home-1", AutoAdopt: true})
+	id, _ := identity.Generate()
+
+	res := enroll(t, svc, id, "SN1")
+	if len(res.Certificate) != 0 || len(res.CACertificate) != 0 {
+		t.Fatalf("no CA configured: result should carry no certs, got cert=%d ca=%d", len(res.Certificate), len(res.CACertificate))
+	}
 }
 
 func TestRequestRejectsIdentityMismatch(t *testing.T) {

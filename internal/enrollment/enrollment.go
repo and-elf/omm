@@ -49,9 +49,13 @@ type Repository interface {
 type Options struct {
 	HomeID    string
 	AutoAdopt bool
-	Rand      io.Reader     // challenge entropy; defaults to crypto/rand
-	Now       func() int64  // unix-seconds clock; defaults to time.Now
-	NewID     func() string // enrollment id generator; defaults to UUID
+	// CA, when set, is the Home CA used to issue a client/server certificate to
+	// each adopted node for mesh mutual TLS. When nil, no certificates are
+	// issued (enrollment stays signature-only).
+	CA    *identity.CA
+	Rand  io.Reader     // challenge entropy; defaults to crypto/rand
+	Now   func() int64  // unix-seconds clock; defaults to time.Now
+	NewID func() string // enrollment id generator; defaults to UUID
 }
 
 // Service runs the controller-side enrollment logic.
@@ -93,11 +97,15 @@ type VerifyInput struct {
 	Signature    []byte `json:"signature"`
 }
 
-// Result is the status (and profile, once approved) of an enrollment.
+// Result is the status (and profile, once approved) of an enrollment. Once
+// approved/active and the Home has a CA, Certificate is the node's issued
+// client/server leaf and CACertificate is the Home CA to pin for mesh TLS.
 type Result struct {
-	Status  models.EnrollmentStatus `json:"status"`
-	HomeID  string                  `json:"home_id,omitempty"`
-	Profile *models.Profile         `json:"profile,omitempty"`
+	Status        models.EnrollmentStatus `json:"status"`
+	HomeID        string                  `json:"home_id,omitempty"`
+	Profile       *models.Profile         `json:"profile,omitempty"`
+	Certificate   []byte                  `json:"certificate,omitempty"`
+	CACertificate []byte                  `json:"ca_certificate,omitempty"`
 }
 
 // Request records an enrollment request and returns a fresh challenge. A node
@@ -260,6 +268,14 @@ func (s *Service) result(ctx context.Context, e models.Enrollment) Result {
 	if e.Status == models.EnrollmentApproved || e.Status == models.EnrollmentActive {
 		if profile, err := s.repo.GetProfile(ctx, e.HomeID); err == nil {
 			res.Profile = &profile
+		}
+		// Issue the node a leaf certificate (and hand back the Home CA to pin)
+		// so it can join the mesh control plane over mutual TLS.
+		if s.opts.CA != nil && len(e.PublicKey) > 0 {
+			if cert, err := s.opts.CA.IssueCert(e.PublicKey); err == nil {
+				res.Certificate = cert
+				res.CACertificate = s.opts.CA.CertificatePEM()
+			}
 		}
 	}
 	return res
