@@ -169,6 +169,8 @@ jobs:
         run: |
           SKIP_FRONTEND=1 ./scripts/build.sh
           ./scripts/package-ipk.sh
+          # The LuCI workflow e2e test installs luci-app-meshd alongside meshd.
+          ./scripts/package-luci-ipk.sh
       # ubuntu-latest ships Docker, so testcontainers connects automatically.
       - name: Run end-to-end tests
         run: go test -tags e2e -timeout 25m -v ./internal/e2e/...
