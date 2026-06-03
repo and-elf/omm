@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   down automatically once onboarding completes. Open by default; set
   `MESHD_SETUP_AP_KEY` for WPA2, `MESHD_SETUP_AP_RADIO` to choose the radio, or
   `MESHD_SETUP_AP=0` to disable (e.g. a radio-less wired controller). New
-  `internal/setupap` package; `uci.Client` gained `SetSection`/`Delete`.
+  `internal/setupap` package; `uci.Client` gained `SetSection`/`Delete`. Covered
+  by a real-OpenWrt-container e2e (`TestSetupAPLifecycleE2E`) asserting the uci
+  sections appear on boot and are removed once onboarding completes.
 - **Companion-app foundation (`web/src/native`).** A swappable native-capability
   bridge (mDNS discovery, WiFi-join, QR label scan) with a web fallback, so the
   same Vue frontend builds as a browser PWA today and as a Capacitor-wrapped

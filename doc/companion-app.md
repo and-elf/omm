@@ -310,9 +310,9 @@ The **unclaimed node** (PHASE 1–2) is always open — no auth needed there.
    done on a dev machine, not in this repo.
 2. **M1 — meshd setup AP:** ✅ *done.* `internal/setupap` (Enable/Disable),
    `uci.Client.SetSection`/`Delete`, wired into the daemon (up while unclaimed,
-   torn down on `/setup/complete`), `MESHD_SETUP_AP*` config. Unit-tested.
-   *Pending:* the real-OpenWrt-container e2e case asserting the AP appears and
-   tears down.
+   torn down on `/setup/complete`), `MESHD_SETUP_AP*` config. Unit-tested **and**
+   covered by a real-OpenWrt-container e2e (`TestSetupAPLifecycleE2E`) that
+   asserts the uci sections appear on boot and are removed on setup completion.
 3. **M2 — discovery + remote context:** mDNS browse, remote-LAN API context,
    "pick a Home" UI.
 4. **M3 — onboarding wizard:** QR-join → reach node → `/enroll/join` →

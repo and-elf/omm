@@ -88,13 +88,24 @@ func (c *client) Set(ctx context.Context, packageName, section, option, value st
 }
 
 func (c *client) SetSection(ctx context.Context, packageName, section, sectionType string, values map[string]string) error {
-	params := map[string]interface{}{
+	// rpcd's uci `set` only updates an existing section (it returns "Not found"
+	// for a missing one), so first `add` the named section of the requested type
+	// — idempotent: a repeat add of an existing named section is a no-op — then
+	// `set` its option values in one call.
+	addParams := map[string]interface{}{
+		"config": packageName,
+		"type":   sectionType,
+		"name":   section,
+	}
+	if err := c.ubusClient.Call(ctx, "uci", "add", addParams, nil); err != nil {
+		return err
+	}
+	setParams := map[string]interface{}{
 		"config":  packageName,
 		"section": section,
-		"type":    sectionType,
 		"values":  values,
 	}
-	return c.ubusClient.Call(ctx, "uci", "set", params, nil)
+	return c.ubusClient.Call(ctx, "uci", "set", setParams, nil)
 }
 
 func (c *client) Delete(ctx context.Context, packageName, section string) error {

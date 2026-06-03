@@ -108,8 +108,9 @@ func TestSetSection(t *testing.T) {
 	fake := &fakeUbusClient{}
 	client := &client{ubusClient: fake}
 
-	// Creating a typed, named section (e.g. a wifi-iface) is a single uci set
-	// that carries the section type plus all its option values.
+	// Creating a typed, named section (e.g. a wifi-iface) is an `add` (rpcd's
+	// `set` won't create a missing section) followed by a `set` that carries the
+	// option values.
 	err := client.SetSection(context.Background(), "wireless", "omm_setup", "wifi-iface", map[string]string{
 		"mode": "ap",
 		"ssid": "OMM-Setup-abcd",
@@ -117,16 +118,19 @@ func TestSetSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fake.lastObject != "uci" || fake.lastMethod != "set" {
-		t.Fatalf("expected uci set call, got %s.%s", fake.lastObject, fake.lastMethod)
+
+	want := []ubusCall{{object: "uci", method: "add"}, {object: "uci", method: "set"}}
+	if !reflect.DeepEqual(fake.calls, want) {
+		t.Fatalf("expected uci add then uci set, got %#v", fake.calls)
 	}
 
+	// The trailing `set` carries the option values on the named section.
 	params, ok := fake.lastParams.(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected params map, got %T", fake.lastParams)
 	}
-	if params["config"] != "wireless" || params["section"] != "omm_setup" || params["type"] != "wifi-iface" {
-		t.Fatalf("unexpected params: %#v", params)
+	if params["config"] != "wireless" || params["section"] != "omm_setup" {
+		t.Fatalf("unexpected set params: %#v", params)
 	}
 	values, ok := params["values"].(map[string]string)
 	if !ok {
