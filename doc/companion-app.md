@@ -331,7 +331,12 @@ The **unclaimed node** (PHASE 1–2) is always open — no auth needed there.
    unit/component-tested. *Pending (device-only):* installing the concrete
    WiFi/barcode plugins, `npx cap add`, and on-device validation of the
    network-context switching in §4's wired-uplink model.
-5. **M4 — controller auth:** LuCI `session.login` for split-mode controllers.
+5. **M4 — controller auth:** ✅ *done.* `web/src/api/controller.ts`:
+   `loginController` (rpcd `session.login`), `createAuthedControllerApi` (meshd
+   over LuCI `/ubus` with the token), and `connectController` which uses open
+   REST in combined mode and falls back to LuCI login in split mode. Wired into
+   the onboarding wizard as an optional "controller sign-in" so adoption can be
+   confirmed in-app against a localhost-bound controller. Unit/component-tested.
 6. **M5 — desktop packaging** + on-device verification matrix.
 </content>
 </invoke>

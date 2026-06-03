@@ -77,4 +77,53 @@ describe('OnboardView', () => {
     expect(done.exists()).toBe(true)
     expect(done.text()).toContain('node-1')
   })
+
+  it('signs in to a split-mode controller to confirm adoption', async () => {
+    setNativeBridge(nativeReady())
+
+    // Node enrolls pending; the authenticated controller client adopts it.
+    let inInventory = false
+    const adoptNode = vi.fn(async () => {
+      inInventory = true
+      return { status: 'approved' }
+    })
+    const authedController = {
+      listNodes: async () => (inInventory ? [{ id: 'node-1' }] : []),
+      listPendingEnrollments: async () => [{ node_id: 'node-1', id: 'e1' }],
+      adoptNode,
+    } as unknown as ApiClient
+    const pendingNode = {
+      getSetup: async () => ({
+        setup_complete: false,
+        node_id: 'node-1',
+        serial: '',
+        home_id: '',
+        home_name: '',
+      }),
+      joinHome: async () => ({ status: 'pending_approval' }),
+    } as unknown as ApiClient
+
+    const connect = vi.fn(async () => authedController)
+
+    const wrapper = mount(OnboardView, {
+      props: { client: controllerClient(), createClient: () => pendingNode, connect },
+    })
+
+    await wrapper.find('[data-test="choose-home"] .btn--primary').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-test="home-row"] .btn--primary').trigger('click')
+
+    // Provide controller credentials, then start.
+    await wrapper.find('[data-test="auth-username"]').setValue('root')
+    await wrapper.find('[data-test="auth-password"]').setValue('pw')
+    await wrapper.find('[data-test="ready"] .btn--primary').trigger('click')
+    await flushPromises()
+
+    expect(connect).toHaveBeenCalledWith('http://controller:8080', {
+      username: 'root',
+      password: 'pw',
+    })
+    expect(adoptNode).toHaveBeenCalledWith('node-1')
+    expect(wrapper.find('[data-test="onboard-done"]').exists()).toBe(true)
+  })
 })

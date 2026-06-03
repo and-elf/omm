@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `useOnboarding` state machine that degrades gracefully when a native
   capability (WiFi/QR) is unavailable. WiFi-join and QR-scan are now wired in the
   Capacitor bridge (still no-ops in the browser PWA).
+- **Companion-app controller authentication.** `connectController()` reaches a
+  controller's management API by the right path automatically: open REST in
+  combined mode, or — for a split-mode controller whose management API is
+  localhost-bound behind LuCI — an rpcd `session.login` (router admin password)
+  to obtain a ubus session token, then meshd calls over the authenticated
+  `/ubus`. The onboarding wizard gains an optional "controller sign-in" so a
+  node can be adopted in-app against a split-mode controller.
 - **End-to-end test for the LuCI integration.** `TestLuCIWorkflowE2E` boots a
   real OpenWrt userland with the built `meshd` + `luci-app-meshd` packages and
   the full LuCI stack (ubusd + rpcd + uhttpd), then drives the operator

@@ -2,22 +2,26 @@
 import { computed, reactive, ref, shallowRef } from 'vue'
 
 import { api, ApiClient, createRemoteApi } from '@/api/client'
+import { connectController, type ConnectOptions } from '@/api/controller'
 import { useDiscovery } from '@/composables/useDiscovery'
 import { useOnboarding, type OnboardStep, type UseOnboarding } from '@/composables/useOnboarding'
 import { getNative } from '@/native'
 import type { SetupCredentials } from '@/native'
 
 // `client` reaches the controller (for discovery + adoption); `createClient`
-// builds a client for a device over the LAN (the node's setup AP). Both are
-// injectable for tests.
+// builds a client for a device over the LAN (the node's setup AP); `connect`
+// builds an authenticated controller client (LuCI login) for split-mode
+// controllers. All injectable for tests.
 const props = withDefaults(
   defineProps<{
     client?: ApiClient
     createClient?: (baseUrl: string) => ApiClient
+    connect?: (baseUrl: string, opts: ConnectOptions) => Promise<ApiClient>
   }>(),
   {
     client: () => api,
     createClient: () => (baseUrl: string) => createRemoteApi(baseUrl),
+    connect: () => connectController,
   },
 )
 
@@ -34,12 +38,21 @@ function chooseHome(url: string) {
 const manual = reactive({ enabled: false, ssid: '', password: '', serial: '' })
 const qrAvailable = getNative().qr.isAvailable()
 
+// Optional controller sign-in for split-mode controllers (management API bound
+// to localhost behind LuCI). When credentials are given the adoption client is
+// obtained via LuCI session.login; otherwise the same-origin client is used.
+const auth = reactive({ enabled: false, mgmtUrl: '', username: '', password: '' })
+const connecting = ref(false)
+const connectError = ref<string | null>(null)
+
 // Phase 2 — run onboarding. shallowRef so the composable's inner refs are not
 // unwrapped by reactive(), keeping `onboarding.<field>.value` valid in template.
 const onboarding = shallowRef<UseOnboarding | null>(null)
 
-function start() {
+async function start() {
   if (!controllerUrl.value) return
+  connectError.value = null
+
   const credentials: SetupCredentials | undefined =
     manual.enabled && manual.ssid.trim()
       ? {
@@ -49,10 +62,28 @@ function start() {
         }
       : undefined
 
+  // Pick the client used to confirm adoption: an authenticated one when the
+  // operator supplied controller credentials, else the same-origin client.
+  let controllerClient: ApiClient = props.client
+  if (auth.enabled && auth.username.trim()) {
+    connecting.value = true
+    try {
+      controllerClient = await props.connect(auth.mgmtUrl.trim() || controllerUrl.value, {
+        username: auth.username.trim(),
+        password: auth.password,
+      })
+    } catch (err) {
+      connectError.value = err instanceof Error ? err.message : String(err)
+      return
+    } finally {
+      connecting.value = false
+    }
+  }
+
   const ob = useOnboarding({
     controllerUrl: controllerUrl.value,
     credentials,
-    controllerClient: props.client,
+    controllerClient,
     createClient: props.createClient,
     native: getNative(),
   })
@@ -135,6 +166,24 @@ const finished = computed(() => onboarding.value?.step.value === 'done')
           <input v-model="manual.password" class="input" @input="manual.enabled = true" />
         </label>
       </details>
+
+      <details class="form__row" data-test="controller-auth" style="margin-top: 0.5rem">
+        <summary>Controller sign-in (for split-mode controllers behind LuCI)</summary>
+        <p class="form__hint">
+          If the controller’s management API is localhost-bound, sign in to confirm adoption in-app.
+        </p>
+        <label class="field"><span>Management URL</span>
+          <input v-model="auth.mgmtUrl" class="input" :placeholder="controllerUrl || 'http://controller'" @input="auth.enabled = true" />
+        </label>
+        <label class="field"><span>Username</span>
+          <input v-model="auth.username" class="input" data-test="auth-username" placeholder="root" @input="auth.enabled = true" />
+        </label>
+        <label class="field"><span>Password</span>
+          <input v-model="auth.password" type="password" class="input" data-test="auth-password" @input="auth.enabled = true" />
+        </label>
+      </details>
+
+      <p v-if="connectError" class="form__error" role="alert" data-test="connect-error">{{ connectError }}</p>
     </div>
 
     <!-- Phase 2: run -->
@@ -165,7 +214,9 @@ const finished = computed(() => onboarding.value?.step.value === 'done')
     </div>
 
     <div v-if="!onboarding && controllerUrl" class="form__row" data-test="ready">
-      <button class="btn btn--primary" @click="start">Start — add a node to {{ controllerUrl }}</button>
+      <button class="btn btn--primary" :disabled="connecting" @click="start">
+        {{ connecting ? 'Signing in…' : `Start — add a node to ${controllerUrl}` }}
+      </button>
     </div>
   </section>
 </template>

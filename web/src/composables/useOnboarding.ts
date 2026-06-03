@@ -160,6 +160,7 @@ async function confirmAdoption(
       if (pending.some((e) => e.node_id === nodeId)) {
         await controller.adoptNode(nodeId)
         adoptSent = true
+        continue // re-check inventory immediately, without waiting a poll cycle
       }
     }
 
