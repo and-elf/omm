@@ -7,7 +7,12 @@ import { VitePWA } from 'vite-plugin-pwa'
 // The meshd backend serves the API at the same origin in production. During
 // development Vite proxies API calls to the locally running daemon.
 const API_TARGET = process.env.MESHD_API_TARGET ?? 'http://localhost:8080'
-const API_PATHS = ['/status', '/health', '/homes', '/nodes']
+// Proxy every meshd REST endpoint to the daemon during development; the SPA
+// (hash-routed) and its assets are served by Vite. A regex over the endpoint
+// roots keeps this from drifting as endpoints are added — anything not matched
+// (assets, /, /icons, …) falls through to the dev server.
+const API_PROXY_RE =
+  '^/(status|health|setup|homes|nodes|active-home|home-selection|scan|enroll|topology|reset)(/|$)'
 
 export default defineConfig({
   plugins: [
@@ -55,8 +60,8 @@ export default defineConfig({
     emptyOutDir: false,
   },
   server: {
-    proxy: Object.fromEntries(
-      API_PATHS.map((path) => [path, { target: API_TARGET, changeOrigin: true }]),
-    ),
+    proxy: {
+      [API_PROXY_RE]: { target: API_TARGET, changeOrigin: true },
+    },
   },
 })
