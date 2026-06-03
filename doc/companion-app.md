@@ -337,6 +337,14 @@ The **unclaimed node** (PHASE 1–2) is always open — no auth needed there.
    REST in combined mode and falls back to LuCI login in split mode. Wired into
    the onboarding wizard as an optional "controller sign-in" so adoption can be
    confirmed in-app against a localhost-bound controller. Unit/component-tested.
-6. **M5 — desktop packaging** + on-device verification matrix.
+6. **M5 — packaging + verification:** ✅ *done (scaffolding).* Native Android/iOS
+   via Capacitor with the QR (`@capacitor-mlkit/barcode-scanning`) and WiFi
+   (`@falconeta/capacitor-wifi-connect`) plugins wired in; desktop ships as the
+   installable PWA; npm `cap:*` scripts; platform projects gitignored and
+   regenerated on a dev machine. See
+   [Packaging & On-Device Verification](companion-app-packaging.md) for the build
+   steps, permissions, the mDNS gap (no Capacitor-8 plugin yet), and the manual
+   verification matrix. *Pending (device-only):* generating the platforms,
+   per-platform permissions, and walking the matrix on hardware.
 </content>
 </invoke>
