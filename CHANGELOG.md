@@ -32,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   native capabilities (mDNS / WiFi-join / QR scan) sit behind a bridge that is a
   no-op in the browser, so the existing PWA is unchanged. See the design spec in
   [doc/companion-app.md](doc/companion-app.md).
+- **Companion app packaging.** The frontend now builds as native Android/iOS apps
+  (Capacitor) with the QR (`@capacitor-mlkit/barcode-scanning`) and WiFi-join
+  (`@falconeta/capacitor-wifi-connect`) plugins wired in; desktop ships as the
+  installable PWA. Native platform projects are generated on a dev machine
+  (gitignored) via `npm run cap:*`. See the build steps, required permissions and
+  the on-device verification matrix in
+  [doc/companion-app-packaging.md](doc/companion-app-packaging.md). (Native mDNS
+  awaits a Capacitor-8 plugin; until then discovery falls back to the daemon's
+  `/scan`.)
 - **End-to-end test for the LuCI integration.** `TestLuCIWorkflowE2E` boots a
   real OpenWrt userland with the built `meshd` + `luci-app-meshd` packages and
   the full LuCI stack (ubusd + rpcd + uhttpd), then drives the operator

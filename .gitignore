@@ -50,6 +50,11 @@ go.work.sum
 /web/coverage/
 *.local
 
+# Generated Capacitor native projects (regenerate with `npx cap add`; see
+# doc/companion-app-packaging.md). Config, deps and scripts are committed.
+/web/android/
+/web/ios/
+
 # Editor/IDE
 # .idea/
 # .vscode/

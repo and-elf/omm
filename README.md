@@ -154,6 +154,7 @@ Build the single-binary product (frontend + daemon) locally with
 | [Security Model](doc/security.md) | mutual TLS, Home-issued certificates, trust model |
 | [OpenWrt Integration & Packaging](doc/openwrt.md) | on-device layout, the LuCI app, the auth model, packaging |
 | [Companion App](doc/companion-app.md) | Cross-platform onboarding app design: setup AP, discovery, native shell |
+| [Companion App Packaging](doc/companion-app-packaging.md) | Per-platform builds, native plugins/permissions, on-device verification matrix |
 | [Roadmap](doc/roadmap.md) | Planned features not yet implemented |
 | [Go Implementation Appendix](doc/implementation.md) | Implementation guidance for the Go codebase |
 | [PWA (`web/README.md`)](web/README.md) | Frontend stack, serving model, development, current status |
