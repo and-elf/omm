@@ -25,8 +25,11 @@ const props = withDefaults(
   }>(),
   {
     client: () => api,
-    createClient: () => (baseUrl: string) => createRemoteApi(baseUrl),
-    connect: () => connectController,
+    // createClient and connect are function-typed props: Vue uses the default as
+    // the value itself (it is not called as a factory the way `client` is), so
+    // these must BE the function, not a factory returning it.
+    createClient: (baseUrl: string) => createRemoteApi(baseUrl),
+    connect: connectController,
   },
 )
 

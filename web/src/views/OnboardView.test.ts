@@ -40,8 +40,46 @@ function nodeClient(): ApiClient {
   } as unknown as ApiClient
 }
 
+function jsonResp(data: unknown) {
+  return { ok: true, status: 200, json: async () => data, text: async () => '' } as Response
+}
+
 describe('OnboardView', () => {
-  afterEach(() => resetNativeBridge())
+  afterEach(() => {
+    resetNativeBridge()
+    vi.unstubAllGlobals()
+  })
+
+  it('reaches the node with the default createClient (no createClient prop)', async () => {
+    // Regression: function-typed prop defaults must BE the function, not a
+    // factory — otherwise createClient(nodeUrl) returns a function and
+    // nodeClient.getSetup is not a function.
+    setNativeBridge(nativeReady())
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const u = String(url)
+      if (u.endsWith('/setup')) {
+        return jsonResp({ setup_complete: false, node_id: 'node-1', serial: '', home_id: '', home_name: '' })
+      }
+      if (u.endsWith('/enroll/join')) return jsonResp({ status: 'active' })
+      return jsonResp({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    // Provide only `client` (for discovery); createClient/connect use defaults.
+    const wrapper = mount(OnboardView, { props: { client: controllerClient() } })
+
+    await wrapper.find('[data-test="choose-home"] .btn--primary').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-test="home-row"] .btn--primary').trigger('click')
+    await wrapper.find('[data-test="node-url"]').setValue('http://127.0.0.1:8081')
+    await wrapper.find('[data-test="ready"] .btn--primary').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="onboard-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="onboard-done"]').exists()).toBe(true)
+    // The default createClient reached the node over HTTP.
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8081/setup', expect.any(Object))
+  })
 
   it('discovers a Home and offers to start once one is selected', async () => {
     setNativeBridge(nativeReady())
