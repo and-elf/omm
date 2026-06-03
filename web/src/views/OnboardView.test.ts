@@ -60,6 +60,27 @@ describe('OnboardView', () => {
     expect(wrapper.find('[data-test="ready"]').exists()).toBe(true)
   })
 
+  it('targets the node URL from the field (overriding the setup-AP default)', async () => {
+    setNativeBridge(nativeReady())
+    const seen: string[] = []
+    const createClient = (baseUrl: string) => {
+      seen.push(baseUrl)
+      return nodeClient()
+    }
+    const wrapper = mount(OnboardView, {
+      props: { client: controllerClient(), createClient },
+    })
+
+    await wrapper.find('[data-test="choose-home"] .btn--primary').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-test="home-row"] .btn--primary').trigger('click')
+    await wrapper.find('[data-test="node-url"]').setValue('http://127.0.0.1:8081')
+    await wrapper.find('[data-test="ready"] .btn--primary').trigger('click')
+    await flushPromises()
+
+    expect(seen).toContain('http://127.0.0.1:8081')
+  })
+
   it('runs the full flow to an adopted node', async () => {
     setNativeBridge(nativeReady())
     const wrapper = mount(OnboardView, {

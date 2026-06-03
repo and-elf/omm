@@ -4,7 +4,12 @@ import { computed, reactive, ref, shallowRef } from 'vue'
 import { api, ApiClient, createRemoteApi } from '@/api/client'
 import { connectController, type ConnectOptions } from '@/api/controller'
 import { useDiscovery } from '@/composables/useDiscovery'
-import { useOnboarding, type OnboardStep, type UseOnboarding } from '@/composables/useOnboarding'
+import {
+  NODE_SETUP_URL,
+  useOnboarding,
+  type OnboardStep,
+  type UseOnboarding,
+} from '@/composables/useOnboarding'
 import { getNative } from '@/native'
 import type { SetupCredentials } from '@/native'
 
@@ -33,6 +38,10 @@ const manualUrl = ref('')
 function chooseHome(url: string) {
   if (url.trim()) controllerUrl.value = url.trim()
 }
+
+// The node's management URL. Defaults to the setup-AP gateway (the device you
+// joined over WiFi); override it for a wired node at a known address.
+const nodeUrl = ref(NODE_SETUP_URL)
 
 // Optional manual setup credentials (used when no QR scanner is available).
 const manual = reactive({ enabled: false, ssid: '', password: '', serial: '' })
@@ -82,6 +91,7 @@ async function start() {
 
   const ob = useOnboarding({
     controllerUrl: controllerUrl.value,
+    nodeUrl: nodeUrl.value.trim() || NODE_SETUP_URL,
     credentials,
     controllerClient,
     createClient: props.createClient,
@@ -156,6 +166,12 @@ const finished = computed(() => onboarding.value?.step.value === 'done')
         <input v-model="manualUrl" class="input" placeholder="http://controller:8080" />
         <button class="btn" @click="chooseHome(manualUrl)">Use this URL</button>
       </div>
+
+      <label class="field" style="margin-top: 0.75rem">
+        <span>Node URL</span>
+        <input v-model="nodeUrl" class="input" data-test="node-url" :placeholder="NODE_SETUP_URL" />
+        <small class="form__hint">The new node's address — the setup-AP default, or a wired node's URL.</small>
+      </label>
 
       <details class="form__row" style="margin-top: 0.75rem">
         <summary>Enter setup details manually{{ qrAvailable ? ' (otherwise scanned from the label)' : '' }}</summary>
