@@ -93,6 +93,72 @@ func TestCompleteSetupHookErrorDoesNotFailRequest(t *testing.T) {
 	}
 }
 
+func TestProvisionUplink(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	store := storage.NewStore(db)
+
+	var gotSSID, gotKey string
+	called := false
+	router := NewRouter(store, noopProfileManager{}, WithUplinkProvisioner(func(_ context.Context, ssid, key string) error {
+		called = true
+		gotSSID, gotKey = ssid, key
+		return nil
+	}))
+
+	rw := postJSON(t, router, "/setup/uplink", map[string]string{"ssid": "HomeNet", "password": "secret"})
+	if rw.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rw.Code, rw.Body)
+	}
+	if !called || gotSSID != "HomeNet" || gotKey != "secret" {
+		t.Fatalf("provisioner called=%v ssid=%q key=%q", called, gotSSID, gotKey)
+	}
+}
+
+func TestProvisionUplinkRejectedAfterSetupComplete(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	store := storage.NewStore(db)
+	if err := store.SetSetupComplete(context.Background(), true); err != nil {
+		t.Fatalf("seed setup complete: %v", err)
+	}
+
+	called := false
+	router := NewRouter(store, noopProfileManager{}, WithUplinkProvisioner(func(context.Context, string, string) error {
+		called = true
+		return nil
+	}))
+
+	// A claimed device must not re-provision its uplink — that is the profile's job.
+	rw := postJSON(t, router, "/setup/uplink", map[string]string{"ssid": "HomeNet"})
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("expected 409 once claimed, got %d (%s)", rw.Code, rw.Body)
+	}
+	if called {
+		t.Fatal("provisioner must not run after setup is complete")
+	}
+}
+
+func TestProvisionUplinkRequiresSSID(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	store := storage.NewStore(db)
+
+	called := false
+	router := NewRouter(store, noopProfileManager{}, WithUplinkProvisioner(func(context.Context, string, string) error {
+		called = true
+		return nil
+	}))
+
+	rw := postJSON(t, router, "/setup/uplink", map[string]string{"ssid": ""})
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing ssid, got %d (%s)", rw.Code, rw.Body)
+	}
+	if called {
+		t.Fatal("provisioner must not run without an ssid")
+	}
+}
+
 func TestUpdateHomeUnknown(t *testing.T) {
 	db, _ := storage.OpenDB(":memory:")
 	t.Cleanup(func() { db.Close() })

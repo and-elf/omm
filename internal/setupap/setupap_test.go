@@ -215,6 +215,106 @@ func TestDisableRemovesSectionsAndReloadsLast(t *testing.T) {
 	}
 }
 
+func TestEnableUplinkAuthorsStation(t *testing.T) {
+	r := newRecordingUCI()
+	m := New(r, Config{Radio: "radio0"})
+
+	if err := m.EnableUplink(context.Background(), "HomeNet", "secret"); err != nil {
+		t.Fatalf("enable uplink: %v", err)
+	}
+
+	wifi, ok := r.sections["wireless.omm_uplink"]
+	if !ok {
+		t.Fatalf("expected a wireless.omm_uplink section, ops=%v", r.ops)
+	}
+	if wifi["mode"] != "sta" {
+		t.Fatalf("mode = %q, want sta", wifi["mode"])
+	}
+	if wifi["ssid"] != "HomeNet" {
+		t.Fatalf("ssid = %q, want HomeNet", wifi["ssid"])
+	}
+	if wifi["device"] != "radio0" {
+		t.Fatalf("device = %q, want radio0", wifi["device"])
+	}
+	if wifi["network"] != "ommuplink" {
+		t.Fatalf("network = %q, want ommuplink", wifi["network"])
+	}
+	if wifi["encryption"] != "psk2" || wifi["key"] != "secret" {
+		t.Fatalf("expected psk2 + key, got encryption=%q key=%q", wifi["encryption"], wifi["key"])
+	}
+
+	// The uplink interface takes its address from the home network over DHCP, so
+	// the node gains a route to the controller.
+	net, ok := r.sections["network.ommuplink"]
+	if !ok {
+		t.Fatalf("expected network.ommuplink, ops=%v", r.ops)
+	}
+	if net["proto"] != "dhcp" {
+		t.Fatalf("proto = %q, want dhcp", net["proto"])
+	}
+
+	if !reloadIsLast(r.ops) {
+		t.Fatalf("reload must run last, ops=%v", r.ops)
+	}
+	if !commitsBeforeReload(r.ops) {
+		t.Fatalf("all commits must precede reload, ops=%v", r.ops)
+	}
+}
+
+func TestEnableUplinkOpenNetwork(t *testing.T) {
+	r := newRecordingUCI()
+	m := New(r, Config{})
+
+	if err := m.EnableUplink(context.Background(), "OpenHome", ""); err != nil {
+		t.Fatalf("enable uplink: %v", err)
+	}
+	wifi := r.sections["wireless.omm_uplink"]
+	if wifi["encryption"] != "none" {
+		t.Fatalf("encryption = %q, want none", wifi["encryption"])
+	}
+	if _, set := wifi["key"]; set {
+		t.Fatalf("open uplink must not set a key, got %q", wifi["key"])
+	}
+}
+
+func TestDisableRemovesUplinkWhenActive(t *testing.T) {
+	r := newRecordingUCI()
+	m := New(r, Config{})
+
+	if err := m.EnableUplink(context.Background(), "HomeNet", "secret"); err != nil {
+		t.Fatalf("enable uplink: %v", err)
+	}
+	if err := m.Disable(context.Background()); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	deleted := map[string]bool{}
+	for _, op := range r.ops {
+		deleted[op] = true
+	}
+	for _, op := range []string{"delete:wireless.omm_uplink", "delete:network.ommuplink"} {
+		if !deleted[op] {
+			t.Fatalf("missing %q, ops=%v", op, r.ops)
+		}
+	}
+}
+
+func TestDisableWithoutUplinkLeavesUplinkSections(t *testing.T) {
+	r := newRecordingUCI()
+	m := New(r, Config{})
+
+	if err := m.Disable(context.Background()); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	// Uplink was never provisioned: deleting its (absent) sections would error on
+	// a real device, so Disable must not touch them.
+	for _, op := range r.ops {
+		if op == "delete:wireless.omm_uplink" || op == "delete:network.ommuplink" {
+			t.Fatalf("must not delete un-provisioned uplink sections, ops=%v", r.ops)
+		}
+	}
+}
+
 func TestEnableReloadFailurePropagates(t *testing.T) {
 	r := newRecordingUCI()
 	r.reloadErr = errors.New("netifd down")

@@ -33,6 +33,7 @@ type apiHandler struct {
 	meshClientAuth  bool
 	devCORS         bool
 	onSetupComplete func(ctx context.Context) error
+	provisionUplink func(ctx context.Context, ssid, key string) error
 }
 
 // Scanner discovers nearby controllers (announced Homes) so the UI can present
@@ -96,6 +97,14 @@ func WithScanner(scan Scanner) Option {
 // do not fail the request — setup is already recorded as complete.
 func WithSetupCompleteHook(hook func(ctx context.Context) error) Option {
 	return func(h *apiHandler) { h.onSetupComplete = hook }
+}
+
+// WithUplinkProvisioner enables POST /setup/uplink, letting the companion app
+// hand an unclaimed node home-WiFi credentials so a wireless-only node can join
+// the home network as a station and reach its controller to enroll. The hook
+// brings up the station interface (e.g. setupap.EnableUplink).
+func WithUplinkProvisioner(hook func(ctx context.Context, ssid, key string) error) Option {
+	return func(h *apiHandler) { h.provisionUplink = hook }
 }
 
 // WithDevCORS adds permissive CORS headers (any origin) and answers preflight
@@ -238,6 +247,9 @@ func (h *apiHandler) registerManagementRoutes(r chi.Router) {
 	r.Get("/status", statusHandler)
 	r.Get("/setup", h.getSetup)
 	r.Post("/setup/complete", h.completeSetup)
+	if h.provisionUplink != nil {
+		r.Post("/setup/uplink", h.provisionUplinkHandler)
+	}
 	r.Get("/homes", h.listHomes)
 	r.Post("/homes", h.createHome)
 	r.Get("/homes/{homeID}", h.getHome)

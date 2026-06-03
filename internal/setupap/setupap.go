@@ -27,6 +27,12 @@ const (
 	wifiSection    = "omm_setup"
 	networkSection = "ommsetup"
 	dhcpSection    = "ommsetup"
+
+	// uplinkWifiSection / uplinkNetSection are the optional station (client) WiFi
+	// and its DHCP-client network, authored by EnableUplink so a wireless-only
+	// node can reach its controller while it enrolls.
+	uplinkWifiSection = "omm_uplink"
+	uplinkNetSection  = "ommuplink"
 )
 
 // Config tunes the setup AP. Zero values fall back to sensible defaults.
@@ -58,6 +64,10 @@ func (c Config) withDefaults() Config {
 type Manager struct {
 	uci uci.Client
 	cfg Config
+	// uplinkActive records whether EnableUplink authored a station interface, so
+	// Disable only tears down uplink sections that actually exist (deleting an
+	// absent section errors on a real device).
+	uplinkActive bool
 }
 
 // New returns a setup-AP manager bound to a UCI client.
@@ -124,7 +134,49 @@ func (m *Manager) Enable(ctx context.Context, nodeID string) error {
 	return m.commitAndReload(ctx)
 }
 
-// Disable removes the setup AP and its network/dhcp sections, then reapplies.
+// EnableUplink joins the node to a home WiFi network as a station, so a
+// wireless-only (un-wired) node gains a route to its controller and can enroll.
+// It authors a station wifi-iface and a DHCP-client network alongside the setup
+// AP (concurrent AP+STA on the same radio), using dedicated section names so an
+// operator's wireless is untouched. Empty key => open network. Idempotent.
+func (m *Manager) EnableUplink(ctx context.Context, ssid, key string) error {
+	// DHCP-client network: the uplink takes its address from the home network.
+	if err := m.uci.SetSection(ctx, "network", uplinkNetSection, "interface", map[string]string{
+		"proto": "dhcp",
+	}); err != nil {
+		return fmt.Errorf("set uplink network: %w", err)
+	}
+
+	wifi := map[string]string{
+		"device":  m.cfg.Radio,
+		"mode":    "sta",
+		"ssid":    ssid,
+		"network": uplinkNetSection,
+	}
+	if key != "" {
+		wifi["encryption"] = "psk2"
+		wifi["key"] = key
+	} else {
+		wifi["encryption"] = "none"
+	}
+	if err := m.uci.SetSection(ctx, "wireless", uplinkWifiSection, "wifi-iface", wifi); err != nil {
+		return fmt.Errorf("set uplink wifi-iface: %w", err)
+	}
+
+	// A fresh OpenWrt radio ships disabled; enable it or the station never joins.
+	if err := m.uci.Set(ctx, "wireless", m.cfg.Radio, "disabled", "0"); err != nil {
+		return fmt.Errorf("enable radio: %w", err)
+	}
+
+	if err := m.commitAndReload(ctx); err != nil {
+		return err
+	}
+	m.uplinkActive = true
+	return nil
+}
+
+// Disable removes the setup AP and its network/dhcp sections (and the uplink
+// station, if one was provisioned), then reapplies.
 func (m *Manager) Disable(ctx context.Context) error {
 	if err := m.uci.Delete(ctx, "wireless", wifiSection); err != nil {
 		return fmt.Errorf("delete setup wifi-iface: %w", err)
@@ -134,6 +186,15 @@ func (m *Manager) Disable(ctx context.Context) error {
 	}
 	if err := m.uci.Delete(ctx, "dhcp", dhcpSection); err != nil {
 		return fmt.Errorf("delete setup dhcp: %w", err)
+	}
+	if m.uplinkActive {
+		if err := m.uci.Delete(ctx, "wireless", uplinkWifiSection); err != nil {
+			return fmt.Errorf("delete uplink wifi-iface: %w", err)
+		}
+		if err := m.uci.Delete(ctx, "network", uplinkNetSection); err != nil {
+			return fmt.Errorf("delete uplink network: %w", err)
+		}
+		m.uplinkActive = false
 	}
 	return m.commitAndReload(ctx)
 }

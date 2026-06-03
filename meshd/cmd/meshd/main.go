@@ -132,8 +132,14 @@ func main() {
 		api.WithTopology(collector),
 		api.WithSignalSource(wifiClients),
 		api.WithSetupCompleteHook(func(ctx context.Context) error {
-			// Device is now claimed: take down the first-boot setup AP.
+			// Device is now claimed: take down the first-boot setup AP (and the
+			// uplink station, if one was provisioned during onboarding).
 			return setupAP.Disable(ctx)
+		}),
+		api.WithUplinkProvisioner(func(ctx context.Context, ssid, key string) error {
+			// Wireless-only onboarding: join the home network as a station so the
+			// node gains a route to its controller and can enroll.
+			return setupAP.EnableUplink(ctx, ssid, key)
 		}),
 		api.WithScanner(func(context.Context) ([]discovery.Announcement, error) {
 			// Answer from the passively-maintained cache, dropping this
