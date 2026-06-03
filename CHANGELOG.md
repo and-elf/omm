@@ -32,6 +32,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   native capabilities (mDNS / WiFi-join / QR scan) sit behind a bridge that is a
   no-op in the browser, so the existing PWA is unchanged. See the design spec in
   [doc/companion-app.md](doc/companion-app.md).
+- **Guided onboarding wizard + wireless-only enrollment.** The onboarding flow is
+  now a three-page wizard — choose Home → choose device → confirm — that
+  auto-progresses between steps and adopts the node in the background once the
+  app holds a controller client, with no manual approve step. A node without an
+  Ethernet uplink can now be enrolled over WiFi: `meshd` gains
+  `POST /setup/uplink` (unclaimed devices only) which brings up a station
+  `wifi-iface` + DHCP-client network from supplied home-WiFi credentials so the
+  node can reach its controller, torn down with the setup AP once onboarding
+  completes (`internal/setupap` `EnableUplink`). On Android the wizard offers a
+  setup-AP picker (`OMM-Setup-*`); iOS/web keep the QR/manual path. Covered by a
+  real-OpenWrt-container e2e (`TestSetupUplinkE2E`). See §13–§14 of
+  [doc/companion-app.md](doc/companion-app.md).
+- **Companion-app local dev workflow.** `scripts/run-dev-stack.sh` plus a Vite
+  dev-server proxy for all meshd REST endpoints make it possible to drive the
+  companion app against a local `meshd` for manual enrollment testing.
+  `MESHD_DEV_CORS` (development only) lets a cross-origin app call the management
+  API directly, logging a warning when enabled. The onboarding wizard can also
+  target an explicit node URL (e.g. a wired node) instead of the setup-AP default.
 - **Companion app packaging.** The frontend now builds as native Android/iOS apps
   (Capacitor) with the QR (`@capacitor-mlkit/barcode-scanning`) and WiFi-join
   (`@falconeta/capacitor-wifi-connect`) plugins wired in; desktop ships as the
@@ -65,6 +83,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `curl -f`, which discarded meshd's JSON error body on any HTTP error, leaving
   rpcd to report a bare `NO_DATA` (5). The plugin now passes meshd's
   `{"error": …}` body back through so the PWA shows the real reason.
+- **Local meshd builds now run on OpenWrt.** `scripts/build.sh` defaults to
+  `CGO_ENABLED=0`, producing a statically-linked binary; the previous dynamic
+  (glibc) build failed on OpenWrt's musl userland with
+  `can't execute '/usr/bin/meshd': No such file or directory`.
+- **Onboarding wizard's default node client.** A function-typed prop default was
+  treated as a factory, so the default client was a function rather than a
+  client; the wizard now reaches the node without an explicit `createClient`.
 
 ## [0.1.1] - 2026-06-02
 
