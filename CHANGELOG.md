@@ -19,33 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `internal/setupap` package; `uci.Client` gained `SetSection`/`Delete`. Covered
   by a real-OpenWrt-container e2e (`TestSetupAPLifecycleE2E`) asserting the uci
   sections appear on boot and are removed once onboarding completes.
-- **Companion-app foundation (`web/src/native`).** A swappable native-capability
-  bridge (mDNS discovery, WiFi-join, QR label scan) with a web fallback, so the
-  same Vue frontend builds as a browser PWA today and as a Capacitor-wrapped
-  cross-platform app. See the design spec in
+- **Companion onboarding app.** The Vue frontend now also builds as a
+  cross-platform companion app (Capacitor: Android/iOS/desktop), whose first goal
+  is to make adding a node a few-tap flow. It discovers controllers on the LAN
+  (native mDNS `_mesh._tcp`, falling back to the daemon's `/scan`), can target a
+  specific device over the LAN (an unclaimed node's setup-AP address or a
+  controller's announced URL), and guides adding a node end to end (`/onboard`):
+  read the device's setup label (QR — OMM-JSON, the `WIFI:` standard, or a bare
+  SSID), join its setup AP, reach it, request enrollment (`/enroll/join`), and
+  confirm adoption — including signing in to a split-mode controller (LuCI
+  `session.login` over `/ubus`) when its management API is localhost-bound. The
+  native capabilities (mDNS / WiFi-join / QR scan) sit behind a bridge that is a
+  no-op in the browser, so the existing PWA is unchanged. See the design spec in
   [doc/companion-app.md](doc/companion-app.md).
-- **Companion-app discovery & remote targeting.** `createRemoteApi(baseUrl)` lets
-  the app talk to a specific device over the LAN (an unclaimed node's setup-AP
-  address or a controller's announced URL). A `useDiscovery` composable prefers
-  native mDNS (`_mesh._tcp` via a Capacitor `Zeroconf` plugin, wired through
-  `@capacitor/core`'s `registerPlugin`) and falls back to the daemon's `/scan`;
-  the Enroll screen's "join a Home" is now native-aware and labels the discovery
-  source. The Capacitor bridge activates only inside a native shell
-  (`initNative()`), so the browser PWA is unchanged.
-- **Companion-app onboarding wizard.** A guided "Add Node" flow (`/onboard`):
-  read a device's setup label (`parseSetupLabel` — OMM-JSON, the `WIFI:` QR
-  standard, or a bare SSID), join its setup AP, reach the node over the LAN,
-  request enrollment (`/enroll/join`), and confirm adoption — driven by a
-  `useOnboarding` state machine that degrades gracefully when a native
-  capability (WiFi/QR) is unavailable. WiFi-join and QR-scan are now wired in the
-  Capacitor bridge (still no-ops in the browser PWA).
-- **Companion-app controller authentication.** `connectController()` reaches a
-  controller's management API by the right path automatically: open REST in
-  combined mode, or — for a split-mode controller whose management API is
-  localhost-bound behind LuCI — an rpcd `session.login` (router admin password)
-  to obtain a ubus session token, then meshd calls over the authenticated
-  `/ubus`. The onboarding wizard gains an optional "controller sign-in" so a
-  node can be adopted in-app against a split-mode controller.
 - **End-to-end test for the LuCI integration.** `TestLuCIWorkflowE2E` boots a
   real OpenWrt userland with the built `meshd` + `luci-app-meshd` packages and
   the full LuCI stack (ubusd + rpcd + uhttpd), then drives the operator
