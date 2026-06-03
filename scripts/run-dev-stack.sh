@@ -8,6 +8,8 @@
 #   scripts/run-dev-stack.sh down     # tear everything down
 #   SKIP_BUILD=1 scripts/run-dev-stack.sh   # reuse the existing build/ipk
 #   AUTO_ADOPT=1 scripts/run-dev-stack.sh   # controller auto-approves (no manual step)
+#   DEV_CORS=1   scripts/run-dev-stack.sh   # allow a cross-origin companion app
+#                                           # (Vite dev server / /onboard wizard)
 #
 # Manual flow once up:
 #   1. Node PWA  -> Setup -> "Join an existing Home" -> http://omm-ctrl:8080
@@ -78,6 +80,9 @@ common=(
   -e MESHD_SETUP_AP=0
   -e MESHD_DATABASE_PATH=/etc/meshd/m.bolt
   -e MESHD_IDENTITY_DIR=/etc/meshd/id
+  # DEV_CORS=1 lets a companion app on another origin (e.g. the Vite dev server,
+  # or the /onboard wizard) call these daemons directly. Dev only.
+  -e "MESHD_DEV_CORS=${DEV_CORS:-0}"
 )
 
 # Controller: its own Home, manual adopt by default.
