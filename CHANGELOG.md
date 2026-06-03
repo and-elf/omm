@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **End-to-end test for the LuCI integration.** `TestLuCIWorkflowE2E` boots a
+  real OpenWrt userland with the built `meshd` + `luci-app-meshd` packages and
+  the full LuCI stack (ubusd + rpcd + uhttpd), then drives the operator
+  workflows over the authenticated `/ubus` endpoint exactly as the PWA does:
+  the ACL gate, node enrollment + adopt, the Home/profile lifecycle, and a
+  wireless client device surfacing through the topology read. Runs in the `e2e`
+  CI job; see [doc/luci-integration-testing.md](doc/luci-integration-testing.md).
+
+### Fixed
+- **Creating a Home through the setup wizard failed with ubus error 5.**
+  Selecting a freshly created Home applied its (non-existent) profile, and the
+  API treated the missing profile as a fatal 500 — even though meshd's own
+  auto-select already treats it as non-fatal. Selecting a Home with no profile
+  yet now succeeds; only real apply failures error.
+- **Opaque ubus error 5 from the LuCI Mesh Manager.** The rpcd plugin used
+  `curl -f`, which discarded meshd's JSON error body on any HTTP error, leaving
+  rpcd to report a bare `NO_DATA` (5). The plugin now passes meshd's
+  `{"error": …}` body back through so the PWA shows the real reason.
+
 ## [0.1.1] - 2026-06-02
 
 ### Fixed

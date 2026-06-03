@@ -102,6 +102,23 @@ func TestPluginProxiesWriteBody(t *testing.T) {
 	}
 }
 
+// When meshd answers with an HTTP error, the plugin must pass meshd's JSON
+// error body back through (with a zero exit) so the PWA can surface the real
+// reason. Otherwise rpcd reports a bare, meaningless ubus status (e.g. 5) and
+// the user is left guessing ("access denied?").
+func TestPluginPropagatesServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":"missing required fields: [id name]"}`)
+	}))
+	defer srv.Close()
+
+	out := runPlugin(t, srv.URL, `{"id":"","name":""}`, "call", "create_home")
+	if !strings.Contains(out, "missing required fields") {
+		t.Fatalf("meshd error body not propagated; got %q", out)
+	}
+}
+
 func TestPluginExtractsPathParam(t *testing.T) {
 	var gotMethod, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

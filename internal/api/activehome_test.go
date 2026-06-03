@@ -96,6 +96,33 @@ func TestActiveHomeApplyFailureReturns500(t *testing.T) {
 	}
 }
 
+// A freshly created Home has no profile yet, so applying it reports
+// storage.ErrNotFound. Selecting such a Home (the last step of the setup
+// wizard) must still succeed — meshd's own auto-select already treats a
+// missing profile as non-fatal; the API must agree, or the wizard 500s.
+func TestActiveHomeMissingProfileIsNonFatal(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	store := storage.NewStore(db)
+	if err := store.CreateHome(context.Background(), models.Home{ID: "home-1", Name: "Home"}); err != nil {
+		t.Fatalf("create home: %v", err)
+	}
+	spy := &spyProfileManager{applyErr: storage.ErrNotFound}
+	router := NewRouter(store, spy)
+
+	rw := putJSON(t, router, "/active-home", `{"home_id":"home-1"}`)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("expected 200 when the home has no profile yet, got %d (%s)", rw.Code, rw.Body)
+	}
+
+	rw = doGet(t, router, "/active-home")
+	var got activeHomeResponse
+	_ = json.Unmarshal(rw.Body.Bytes(), &got)
+	if got.HomeID != "home-1" {
+		t.Fatalf("expected active home home-1, got %q", got.HomeID)
+	}
+}
+
 func TestActiveHomeRejectsUnknownHome(t *testing.T) {
 	db, _ := storage.OpenDB(":memory:")
 	t.Cleanup(func() { db.Close() })
