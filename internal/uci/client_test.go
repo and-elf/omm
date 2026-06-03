@@ -104,6 +104,54 @@ func TestCommit(t *testing.T) {
 	}
 }
 
+func TestSetSection(t *testing.T) {
+	fake := &fakeUbusClient{}
+	client := &client{ubusClient: fake}
+
+	// Creating a typed, named section (e.g. a wifi-iface) is a single uci set
+	// that carries the section type plus all its option values.
+	err := client.SetSection(context.Background(), "wireless", "omm_setup", "wifi-iface", map[string]string{
+		"mode": "ap",
+		"ssid": "OMM-Setup-abcd",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.lastObject != "uci" || fake.lastMethod != "set" {
+		t.Fatalf("expected uci set call, got %s.%s", fake.lastObject, fake.lastMethod)
+	}
+
+	params, ok := fake.lastParams.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected params map, got %T", fake.lastParams)
+	}
+	if params["config"] != "wireless" || params["section"] != "omm_setup" || params["type"] != "wifi-iface" {
+		t.Fatalf("unexpected params: %#v", params)
+	}
+	values, ok := params["values"].(map[string]string)
+	if !ok {
+		t.Fatalf("unexpected values type: %#v", params["values"])
+	}
+	if values["mode"] != "ap" || values["ssid"] != "OMM-Setup-abcd" {
+		t.Fatalf("unexpected values: %#v", values)
+	}
+}
+
+func TestDelete(t *testing.T) {
+	fake := &fakeUbusClient{}
+	client := &client{ubusClient: fake}
+
+	if err := client.Delete(context.Background(), "network", "ommsetup"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.lastObject != "uci" || fake.lastMethod != "delete" {
+		t.Fatalf("expected uci delete call, got %s.%s", fake.lastObject, fake.lastMethod)
+	}
+	if !reflect.DeepEqual(fake.lastParams, map[string]string{"config": "network", "section": "ommsetup"}) {
+		t.Fatalf("unexpected params: %#v", fake.lastParams)
+	}
+}
+
 func TestReload(t *testing.T) {
 	fake := &fakeUbusClient{}
 	client := &client{ubusClient: fake}

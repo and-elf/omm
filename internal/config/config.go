@@ -39,6 +39,11 @@ type Config struct {
 	// Topology collection.
 	BatmanIface  string   // batman-adv interface (e.g. bat0)
 	APInterfaces []string // hostapd interfaces to read clients from
+
+	// First-boot setup AP (brought up while the device is unclaimed).
+	SetupAPEnabled bool   // bring up the setup AP while unclaimed (default true)
+	SetupAPRadio   string // wifi-device hosting the setup AP (default radio0)
+	SetupAPKey     string // WPA2 passphrase for the setup AP; empty => open
 }
 
 // Combined reports whether the daemon should serve a single server (both planes
@@ -81,6 +86,10 @@ func Load() Config {
 
 		BatmanIface:  envOr("MESHD_BATMAN_IFACE", "bat0"),
 		APInterfaces: splitList(os.Getenv("MESHD_AP_IFACES")),
+
+		SetupAPEnabled: envBoolOr("MESHD_SETUP_AP", true),
+		SetupAPRadio:   envOr("MESHD_SETUP_AP_RADIO", "radio0"),
+		SetupAPKey:     os.Getenv("MESHD_SETUP_AP_KEY"),
 	}
 }
 
@@ -93,6 +102,19 @@ func envOr(key, fallback string) string {
 
 func envBool(key string) bool {
 	switch os.Getenv(key) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// envBoolOr parses a boolean env var, returning fallback when the var is unset.
+// An explicit falsey value (0/false/no/off) overrides a true fallback.
+func envBoolOr(key string, fallback bool) bool {
+	switch os.Getenv(key) {
+	case "":
+		return fallback
 	case "1", "true", "yes", "on":
 		return true
 	default:

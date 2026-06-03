@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -48,6 +49,47 @@ func TestSetupFlow(t *testing.T) {
 	_ = json.Unmarshal(rw.Body.Bytes(), &s)
 	if !s.SetupComplete || s.HomeName != "Cottage" {
 		t.Fatalf("expected completed setup with renamed home, got %+v", s)
+	}
+}
+
+func TestCompleteSetupRunsHook(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	store := storage.NewStore(db)
+
+	called := false
+	router := NewRouter(store, noopProfileManager{}, WithSetupCompleteHook(func(context.Context) error {
+		called = true
+		return nil
+	}))
+
+	rw := postJSON(t, router, "/setup/complete", nil)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("complete setup: expected 200, got %d", rw.Code)
+	}
+	if !called {
+		t.Fatal("expected setup-complete hook to run when setup completes")
+	}
+}
+
+func TestCompleteSetupHookErrorDoesNotFailRequest(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	store := storage.NewStore(db)
+
+	router := NewRouter(store, noopProfileManager{}, WithSetupCompleteHook(func(context.Context) error {
+		return errors.New("teardown failed")
+	}))
+
+	// Setup is recorded complete before the hook runs, so a teardown failure
+	// must not surface as a request error.
+	rw := postJSON(t, router, "/setup/complete", nil)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("expected 200 despite hook error, got %d", rw.Code)
+	}
+	complete, err := store.GetSetupComplete(context.Background())
+	if err != nil || !complete {
+		t.Fatalf("expected setup_complete persisted true, got %v (err=%v)", complete, err)
 	}
 }
 

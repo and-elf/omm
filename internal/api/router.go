@@ -20,17 +20,18 @@ import (
 )
 
 type apiHandler struct {
-	store          storage.Store
-	profileManager profiles.ProfileManager
-	enrollment     *enrollment.Service
-	self           *identity.Identity
-	selfSerial     string
-	selfHomeID     string
-	topology       *topology.Collector
-	topoAgg        *topology.Aggregator
-	signals        SignalSource
-	scan           Scanner
-	meshClientAuth bool
+	store           storage.Store
+	profileManager  profiles.ProfileManager
+	enrollment      *enrollment.Service
+	self            *identity.Identity
+	selfSerial      string
+	selfHomeID      string
+	topology        *topology.Collector
+	topoAgg         *topology.Aggregator
+	signals         SignalSource
+	scan            Scanner
+	meshClientAuth  bool
+	onSetupComplete func(ctx context.Context) error
 }
 
 // Scanner discovers nearby controllers (announced Homes) so the UI can present
@@ -86,6 +87,14 @@ func WithSignalSource(src SignalSource) Option {
 // WithScanner enables GET /scan, which discovers nearby controllers.
 func WithScanner(scan Scanner) Option {
 	return func(h *apiHandler) { h.scan = scan }
+}
+
+// WithSetupCompleteHook registers a callback run after onboarding is marked
+// complete (POST /setup/complete). The daemon uses it to tear down the
+// first-boot setup AP once the device is claimed. Hook errors are reported but
+// do not fail the request — setup is already recorded as complete.
+func WithSetupCompleteHook(hook func(ctx context.Context) error) Option {
+	return func(h *apiHandler) { h.onSetupComplete = hook }
 }
 
 // WithMeshClientAuth requires a verified mesh client certificate on the mesh
