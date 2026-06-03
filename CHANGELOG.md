@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-03
+
 ### Added
 - **First-boot setup access point.** While a device is unclaimed (setup not
   complete) `meshd` now brings up a known, label-printable WiFi AP
@@ -151,7 +153,8 @@ control plane, a native LuCI app, and signed opkg **and** apk package feeds.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/and-elf/omm/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/and-elf/omm/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/and-elf/omm/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/and-elf/omm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/and-elf/omm/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/and-elf/omm/releases/tag/v0.0.1
