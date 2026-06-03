@@ -1,14 +1,8 @@
 import { Capacitor, registerPlugin } from '@capacitor/core'
 
 import type { DiscoveredController } from '@/types'
-import type {
-  DiscoveryService,
-  NativeBridge,
-  QrService,
-  SetupCredentials,
-  WifiService,
-} from './types'
-import { NativeUnavailableError } from './types'
+import type { DiscoveryService, NativeBridge, QrService, SetupCredentials, WifiService } from './types'
+import { SetupLabelError, parseSetupLabel } from './setupLabel'
 
 // The native bridge backed by Capacitor. mDNS discovery uses the
 // @capacitor-community/zeroconf plugin, obtained through registerPlugin so the
@@ -78,15 +72,45 @@ const discovery: DiscoveryService = {
   },
 }
 
-// WiFi join and QR-label scan land in M3; expose them as unavailable for now so
-// callers degrade gracefully (e.g. manual SSID/URL entry).
-const wifi: WifiService = {
-  isAvailable: () => false,
-  joinNetwork: () => Promise.reject(new NativeUnavailableError('wifi.join')),
+// WiFi join — provided on device by a connect plugin (e.g.
+// @falconeta/capacitor-wifi-connect, registered as 'CapacitorWifiConnect'):
+// connect() joins an open SSID, secureConnect() a WPA one. Scoped to the app on
+// Android (WifiNetworkSpecifier) and a NEHotspotConfiguration on iOS.
+interface WifiConnectPlugin {
+  connect(opts: { ssid: string }): Promise<{ value: boolean }>
+  secureConnect(opts: { ssid: string; password: string }): Promise<{ value: boolean }>
 }
+const WifiConnect = registerPlugin<WifiConnectPlugin>('CapacitorWifiConnect')
+
+const wifi: WifiService = {
+  isAvailable: () => Capacitor.isNativePlatform(),
+  async joinNetwork(ssid: string, password?: string): Promise<void> {
+    if (password) {
+      await WifiConnect.secureConnect({ ssid, password })
+    } else {
+      await WifiConnect.connect({ ssid })
+    }
+  },
+}
+
+// QR-label scan — provided on device by a barcode plugin (e.g.
+// @capacitor-mlkit/barcode-scanning, registered as 'BarcodeScanning').
+interface Barcode {
+  rawValue: string
+}
+interface BarcodeScanningPlugin {
+  scan(): Promise<{ barcodes: Barcode[] }>
+}
+const BarcodeScanning = registerPlugin<BarcodeScanningPlugin>('BarcodeScanning')
+
 const qr: QrService = {
-  isAvailable: () => false,
-  scanSetupLabel: (): Promise<SetupCredentials> => Promise.reject(new NativeUnavailableError('qr')),
+  isAvailable: () => Capacitor.isNativePlatform(),
+  async scanSetupLabel(): Promise<SetupCredentials> {
+    const { barcodes } = await BarcodeScanning.scan()
+    const raw = barcodes?.[0]?.rawValue
+    if (!raw) throw new SetupLabelError('no QR code detected')
+    return parseSetupLabel(raw)
+  },
 }
 
 export const capacitorBridge: NativeBridge = {

@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Enroll screen's "join a Home" is now native-aware and labels the discovery
   source. The Capacitor bridge activates only inside a native shell
   (`initNative()`), so the browser PWA is unchanged.
+- **Companion-app onboarding wizard.** A guided "Add Node" flow (`/onboard`):
+  read a device's setup label (`parseSetupLabel` — OMM-JSON, the `WIFI:` QR
+  standard, or a bare SSID), join its setup AP, reach the node over the LAN,
+  request enrollment (`/enroll/join`), and confirm adoption — driven by a
+  `useOnboarding` state machine that degrades gracefully when a native
+  capability (WiFi/QR) is unavailable. WiFi-join and QR-scan are now wired in the
+  Capacitor bridge (still no-ops in the browser PWA).
 - **End-to-end test for the LuCI integration.** `TestLuCIWorkflowE2E` boots a
   real OpenWrt userland with the built `meshd` + `luci-app-meshd` packages and
   the full LuCI stack (ubusd + rpcd + uhttpd), then drives the operator

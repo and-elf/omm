@@ -37,12 +37,17 @@ vi.mock('@capacitor/core', () => {
   ]
   return {
     Capacitor: { isNativePlatform: () => true },
+    // One fake covers every registerPlugin id used by the bridge (Zeroconf,
+    // CapacitorWifiConnect, BarcodeScanning).
     registerPlugin: () => ({
       watch: async (_opts: unknown, cb: WatchCb) => {
         services.forEach((s) => cb(s))
         return { callbackId: '1' }
       },
       unwatch: async () => {},
+      connect: async () => ({ value: true }),
+      secureConnect: async () => ({ value: true }),
+      scan: async () => ({ barcodes: [{ rawValue: '{"ssid":"OMM-Setup-a51f","password":"pw"}' }] }),
     }),
   }
 })
@@ -87,8 +92,18 @@ describe('capacitor bridge', () => {
     expect(c.api).toBe('https://controller.example:8443')
   })
 
-  it('wifi and qr are not yet available on native (M3)', () => {
-    expect(capacitorBridge.wifi.isAvailable()).toBe(false)
-    expect(capacitorBridge.qr.isAvailable()).toBe(false)
+  it('exposes wifi join and qr label scan on native', async () => {
+    expect(capacitorBridge.wifi.isAvailable()).toBe(true)
+    expect(capacitorBridge.qr.isAvailable()).toBe(true)
+
+    // joinNetwork resolves through the connect plugin without throwing.
+    await expect(capacitorBridge.wifi.joinNetwork('OMM-Setup-a51f', 'pw')).resolves.toBeUndefined()
+
+    // scanSetupLabel parses the scanned barcode payload into credentials.
+    await expect(capacitorBridge.qr.scanSetupLabel()).resolves.toEqual({
+      ssid: 'OMM-Setup-a51f',
+      password: 'pw',
+      serial: undefined,
+    })
   })
 })

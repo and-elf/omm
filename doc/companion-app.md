@@ -322,8 +322,15 @@ The **unclaimed node** (PHASE 1–2) is always open — no auth needed there.
    discovery-source badge. All unit-tested. *Pending (device-only):* the actual
    `@capacitor-community/zeroconf` install + `npx cap add android/ios` and
    on-device validation of the TXT-record mapping.
-4. **M3 — onboarding wizard:** QR-join → reach node → `/enroll/join` →
-   adopt → confirm, end to end against §4's wired-uplink model.
+4. **M3 — onboarding wizard:** ✅ *done.* `parseSetupLabel` (OMM-JSON / `WIFI:` /
+   bare SSID), real WiFi-join + QR-scan in the Capacitor bridge (via
+   `registerPlugin`), a `useOnboarding` state machine (scan → join WiFi → reach
+   node → `/enroll/join` → adopt → confirm, with graceful degradation when a
+   capability is absent), and an `OnboardView` wizard (`/onboard`, "Add Node" in
+   the nav) that discovers/selects the target Home then runs the flow. All
+   unit/component-tested. *Pending (device-only):* installing the concrete
+   WiFi/barcode plugins, `npx cap add`, and on-device validation of the
+   network-context switching in §4's wired-uplink model.
 5. **M4 — controller auth:** LuCI `session.login` for split-mode controllers.
 6. **M5 — desktop packaging** + on-device verification matrix.
 </content>
