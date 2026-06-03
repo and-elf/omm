@@ -36,7 +36,7 @@ vi.mock('@capacitor/core', () => {
     },
   ]
   return {
-    Capacitor: { isNativePlatform: () => true },
+    Capacitor: { isNativePlatform: () => true, getPlatform: () => 'android' },
     // One fake covers every registerPlugin id used by the bridge (Zeroconf,
     // CapacitorWifiConnect, BarcodeScanning).
     registerPlugin: () => ({
@@ -47,7 +47,12 @@ vi.mock('@capacitor/core', () => {
       unwatch: async () => {},
       connect: async () => ({ value: true }),
       secureConnect: async () => ({ value: true }),
-      scan: async () => ({ barcodes: [{ rawValue: '{"ssid":"OMM-Setup-a51f","password":"pw"}' }] }),
+      // WifiConnect.scan returns nearby networks; BarcodeScanning.scan returns
+      // barcodes. The single fake serves both shapes.
+      scan: async () => ({
+        barcodes: [{ rawValue: '{"ssid":"OMM-Setup-a51f","password":"pw"}' }],
+        networks: [{ ssid: 'HomeNet' }, { ssid: 'OMM-Setup-a51f', bssid: 'aa:bb' }],
+      }),
     }),
   }
 })
@@ -105,5 +110,13 @@ describe('capacitor bridge', () => {
       password: 'pw',
       serial: undefined,
     })
+  })
+
+  it('exposes WiFi scan on Android, returning nearby networks', async () => {
+    expect(typeof capacitorBridge.wifi.scanNetworks).toBe('function')
+    await expect(capacitorBridge.wifi.scanNetworks!()).resolves.toEqual([
+      { ssid: 'HomeNet', bssid: undefined },
+      { ssid: 'OMM-Setup-a51f', bssid: 'aa:bb' },
+    ])
   })
 })

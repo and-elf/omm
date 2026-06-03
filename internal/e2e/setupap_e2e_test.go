@@ -73,12 +73,11 @@ exec env \
 	/usr/bin/meshd
 `
 
-// TestSetupAPLifecycleE2E asserts an unclaimed device authors the setup AP uci
-// sections on boot and removes them when onboarding completes.
-func TestSetupAPLifecycleE2E(t *testing.T) {
+// startSetupDevContainer boots an unclaimed combined-mode meshd on a real
+// OpenWrt userland (ubusd + rpcd + uci) and returns the running container.
+func startSetupDevContainer(ctx context.Context, t *testing.T) testcontainers.Container {
+	t.Helper()
 	tg := targets[0] // opkg-23.05
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
 
 	meshdIPK := filepath.Join(repoRoot(t), tg.pkgRel)
 	if _, err := os.Stat(meshdIPK); err != nil {
@@ -110,6 +109,16 @@ func TestSetupAPLifecycleE2E(t *testing.T) {
 		t.Fatalf("start setup-dev: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Terminate(ctx) })
+	return c
+}
+
+// TestSetupAPLifecycleE2E asserts an unclaimed device authors the setup AP uci
+// sections on boot and removes them when onboarding completes.
+func TestSetupAPLifecycleE2E(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	c := startSetupDevContainer(ctx, t)
 
 	// 1. On boot, the setup AP sections appear with the expected values.
 	ssid := waitUCI(ctx, t, c, "wireless.omm_setup.ssid", 60*time.Second)
@@ -139,6 +148,61 @@ func TestSetupAPLifecycleE2E(t *testing.T) {
 	assertUCIAbsent(ctx, t, c, "network.ommsetup")
 	assertUCIAbsent(ctx, t, c, "dhcp.ommsetup")
 	t.Logf("setup AP torn down after /setup/complete")
+}
+
+// TestSetupUplinkE2E asserts an unclaimed device, asked to join a home WiFi over
+// POST /setup/uplink, authors the station wifi-iface + DHCP-client network so it
+// can reach its controller, and that completing setup tears those down too.
+func TestSetupUplinkE2E(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	c := startSetupDevContainer(ctx, t)
+
+	// Wait until the boot-time setup AP is up, so the daemon is fully ready.
+	waitUCI(ctx, t, c, "wireless.omm_setup.ssid", 60*time.Second)
+
+	// Provision a WiFi uplink to the home network.
+	base := mappedURL(ctx, t, c, "8080/tcp")
+	resp, err := http.Post(base+"/setup/uplink", "application/json",
+		strings.NewReader(`{"ssid":"HomeNet","password":"home-secret"}`))
+	if err != nil {
+		t.Fatalf("POST /setup/uplink: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /setup/uplink status %d", resp.StatusCode)
+	}
+
+	// The station interface and its DHCP-client network appear with our values.
+	if mode := waitUCI(ctx, t, c, "wireless.omm_uplink.mode", 30*time.Second); mode != "sta" {
+		t.Fatalf("uplink mode = %q, want sta", mode)
+	}
+	if ssid := uciGet(ctx, t, c, "wireless.omm_uplink.ssid"); ssid != "HomeNet" {
+		t.Fatalf("uplink ssid = %q, want HomeNet", ssid)
+	}
+	if enc := uciGet(ctx, t, c, "wireless.omm_uplink.encryption"); enc != "psk2" {
+		t.Fatalf("uplink encryption = %q, want psk2", enc)
+	}
+	if proto := uciGet(ctx, t, c, "network.ommuplink.proto"); proto != "dhcp" {
+		t.Fatalf("uplink network proto = %q, want dhcp", proto)
+	}
+	t.Logf("uplink station provisioned: ssid=HomeNet")
+
+	// Completing setup tears down the uplink (and the setup AP) — the applied
+	// profile owns the node's real network config from here on.
+	resp, err = http.Post(base+"/setup/complete", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /setup/complete: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /setup/complete status %d", resp.StatusCode)
+	}
+
+	waitUCIAbsent(ctx, t, c, "wireless.omm_uplink", 30*time.Second)
+	assertUCIAbsent(ctx, t, c, "network.ommuplink")
+	t.Logf("uplink torn down after /setup/complete")
 }
 
 // uciExec runs `uci -q get <key>` (or show) in the container, returning the

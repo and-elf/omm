@@ -152,6 +152,76 @@ describe('useOnboarding', () => {
     expect(ob.step.value).toBe('done')
   })
 
+  it('provisions a WiFi uplink with home credentials before enrolling', async () => {
+    const provisionUplink = vi.fn(async () => ({ provisioned: true }))
+    const joinHome = vi.fn(async () => ({ status: 'active' }))
+    const node = {
+      getSetup: async () => ({ setup_complete: false, node_id: 'node-1', serial: '', home_id: '', home_name: '' }),
+      provisionUplink,
+      joinHome,
+    } as unknown as ApiClient
+
+    const ob = useOnboarding({
+      controllerUrl: 'http://controller:8080',
+      credentials: creds,
+      native: nativeBridge({}),
+      createClient: () => node,
+      uplink: 'wifi',
+      homeWifi: { ssid: 'HomeNet', password: 'home-pw' },
+    })
+    await ob.run()
+
+    expect(provisionUplink).toHaveBeenCalledWith('HomeNet', 'home-pw')
+    // Uplink must be provisioned before the node is told to enroll.
+    expect(provisionUplink.mock.invocationCallOrder[0]).toBeLessThan(joinHome.mock.invocationCallOrder[0])
+    expect(ob.step.value).toBe('done')
+    expect(ob.error.value).toBeNull()
+  })
+
+  it('does not provision an uplink for a wired node (default)', async () => {
+    const provisionUplink = vi.fn(async () => ({ provisioned: true }))
+    const node = {
+      getSetup: async () => ({ setup_complete: false, node_id: 'node-1', serial: '', home_id: '', home_name: '' }),
+      provisionUplink,
+      joinHome: async () => ({ status: 'active' }),
+    } as unknown as ApiClient
+
+    const ob = useOnboarding({
+      controllerUrl: 'http://controller:8080',
+      credentials: creds,
+      native: nativeBridge({}),
+      createClient: () => node,
+      // no uplink option => wired
+    })
+    await ob.run()
+
+    expect(provisionUplink).not.toHaveBeenCalled()
+    expect(ob.step.value).toBe('done')
+  })
+
+  it('surfaces the provisionUplink step when uplink provisioning fails', async () => {
+    const node = {
+      getSetup: async () => ({ setup_complete: false, node_id: 'node-1', serial: '', home_id: '', home_name: '' }),
+      provisionUplink: async () => {
+        throw new Error('no such SSID')
+      },
+      joinHome: async () => ({ status: 'active' }),
+    } as unknown as ApiClient
+
+    const ob = useOnboarding({
+      controllerUrl: 'http://controller:8080',
+      credentials: creds,
+      native: nativeBridge({}),
+      createClient: () => node,
+      uplink: 'wifi',
+      homeWifi: { ssid: 'HomeNet', password: 'home-pw' },
+    })
+    await ob.run()
+
+    expect(ob.step.value).toBe('provisionUplink')
+    expect(ob.error.value).toMatch(/no such SSID/)
+  })
+
   it('surfaces the failing step when the node is unreachable', async () => {
     const node = {
       getSetup: async () => {

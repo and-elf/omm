@@ -16,6 +16,11 @@ if [ "${SKIP_FRONTEND:-0}" != "1" ]; then
   fi
 fi
 
-go build -o bin/meshd ./meshd/cmd/meshd
+# CGO_ENABLED=0 produces a statically-linked binary that runs on OpenWrt's musl
+# userland — the deployment target. A dynamic (glibc) build fails on-device with
+# "can't execute '/usr/bin/meshd': No such file or directory" because its ELF
+# interpreter is absent. The daemon is pure Go, so a static build has no cost.
+# Overridable (CGO_ENABLED=1) for the rare case a dynamic host build is wanted.
+CGO_ENABLED="${CGO_ENABLED:-0}" go build -o bin/meshd ./meshd/cmd/meshd
 
 echo "Built bin/meshd"

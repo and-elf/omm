@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -54,6 +55,41 @@ func (h *apiHandler) completeSetup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"setup_complete": true})
+}
+
+// provisionUplinkHandler joins an unclaimed node to a home WiFi network as a
+// station so a wireless-only node gains a route to its controller and can
+// enroll. Refused once the device is claimed — the applied profile then owns the
+// node's network config.
+func (h *apiHandler) provisionUplinkHandler(w http.ResponseWriter, r *http.Request) {
+	complete, err := h.store.GetSetupComplete(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if complete {
+		respondError(w, http.StatusConflict, errors.New("device already claimed; uplink is managed by its profile"))
+		return
+	}
+
+	var req struct {
+		SSID     string `json:"ssid"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.SSID == "" {
+		respondError(w, http.StatusBadRequest, errors.New("ssid is required"))
+		return
+	}
+
+	if err := h.provisionUplink(r.Context(), req.SSID, req.Password); err != nil {
+		respondError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"provisioned": true})
 }
 
 // updateHome renames/updates an existing Home (used by "Create New Home" in the
