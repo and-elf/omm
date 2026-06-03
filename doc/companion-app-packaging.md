@@ -49,6 +49,39 @@ nothing here can build them.)
 
 ---
 
+## Release publishing
+
+The release workflow ([`.github/workflows/release.yml`](../.github/workflows/release.yml))
+builds the **Android** companion app on a `v*` tag and attaches the APK to the
+GitHub Release, alongside the meshd packages. It is **decoupled** from the
+package jobs (`continue-on-error`), so a build hiccup here never blocks the
+OpenWrt release — the APK is attached only when the job succeeds. The APK is
+kept out of `dist/` so it is never mistaken for an OpenWrt apk package in the
+feed index.
+
+iOS and desktop are **not** published this way: iOS distribution is App
+Store / TestFlight (a separate, credentialed pipeline), and desktop is the
+installable PWA already served by the device.
+
+**Signing (opt-in).** Without secrets the job publishes an *unsigned* APK
+(`omm-companion-<version>-unsigned.apk`). To publish a signed one, store these
+repository secrets (generate a keystore with `keytool -genkeypair -v -keystore
+omm.jks -keyalg RSA -keysize 2048 -validity 10000 -alias omm`):
+
+| Secret | Value |
+|--------|-------|
+| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 omm.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_ALIAS` | key alias (e.g. `omm`) |
+| `ANDROID_KEY_PASSWORD` | key password |
+
+> First-run note: this is the one job that can't be validated locally. The SDK /
+> Android-Gradle-Plugin versions it installs (`platforms;android-35`,
+> `build-tools;35.0.0`) may need bumping to match the Capacitor android template
+> on its first real tag/`workflow_dispatch` run.
+
+---
+
 ## Plugin wiring
 
 Native capabilities are reached via `@capacitor/core`'s `registerPlugin(<id>)`,

@@ -41,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [doc/companion-app-packaging.md](doc/companion-app-packaging.md). (Native mDNS
   awaits a Capacitor-8 plugin; until then discovery falls back to the daemon's
   `/scan`.)
+- **Release publishes the Android companion app.** A `v*` tag now also builds
+  and (with an `ANDROID_KEYSTORE_BASE64` secret) signs the Android APK and
+  attaches it to the GitHub Release. The job is decoupled from the meshd package
+  jobs, so it never blocks the OpenWrt release; iOS (App Store/TestFlight) and
+  desktop (the installable PWA) are out of scope. Required secrets are listed in
+  [doc/companion-app-packaging.md](doc/companion-app-packaging.md#release-publishing).
 - **End-to-end test for the LuCI integration.** `TestLuCIWorkflowE2E` boots a
   real OpenWrt userland with the built `meshd` + `luci-app-meshd` packages and
   the full LuCI stack (ubusd + rpcd + uhttpd), then drives the operator
