@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **First-boot setup access point.** While a device is unclaimed (setup not
+  complete) `meshd` now brings up a known, label-printable WiFi AP
+  (`OMM-Setup-<last4-of-node-id>`) on a small static network
+  (`192.168.254.1/24`) serving its open management API, so a companion app can
+  reach an out-of-the-box node before it has joined any network. The AP is torn
+  down automatically once onboarding completes. Open by default; set
+  `MESHD_SETUP_AP_KEY` for WPA2, `MESHD_SETUP_AP_RADIO` to choose the radio, or
+  `MESHD_SETUP_AP=0` to disable (e.g. a radio-less wired controller). New
+  `internal/setupap` package; `uci.Client` gained `SetSection`/`Delete`. Covered
+  by a real-OpenWrt-container e2e (`TestSetupAPLifecycleE2E`) asserting the uci
+  sections appear on boot and are removed once onboarding completes.
+- **Companion onboarding app.** The Vue frontend now also builds as a
+  cross-platform companion app (Capacitor: Android/iOS/desktop), whose first goal
+  is to make adding a node a few-tap flow. It discovers controllers on the LAN
+  (native mDNS `_mesh._tcp`, falling back to the daemon's `/scan`), can target a
+  specific device over the LAN (an unclaimed node's setup-AP address or a
+  controller's announced URL), and guides adding a node end to end (`/onboard`):
+  read the device's setup label (QR — OMM-JSON, the `WIFI:` standard, or a bare
+  SSID), join its setup AP, reach it, request enrollment (`/enroll/join`), and
+  confirm adoption — including signing in to a split-mode controller (LuCI
+  `session.login` over `/ubus`) when its management API is localhost-bound. The
+  native capabilities (mDNS / WiFi-join / QR scan) sit behind a bridge that is a
+  no-op in the browser, so the existing PWA is unchanged. See the design spec in
+  [doc/companion-app.md](doc/companion-app.md).
 - **End-to-end test for the LuCI integration.** `TestLuCIWorkflowE2E` boots a
   real OpenWrt userland with the built `meshd` + `luci-app-meshd` packages and
   the full LuCI stack (ubusd + rpcd + uhttpd), then drives the operator

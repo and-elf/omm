@@ -21,6 +21,7 @@ import (
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/profiles"
 	"github.com/and-elf/omm/internal/selection"
+	"github.com/and-elf/omm/internal/setupap"
 	"github.com/and-elf/omm/internal/storage"
 	"github.com/and-elf/omm/internal/topology"
 	"github.com/and-elf/omm/internal/ubus"
@@ -95,6 +96,15 @@ func main() {
 	profileManager := profiles.NewManager(store, uciClient)
 	enrollSvc := enrollment.NewService(store, enrollment.Options{HomeID: cfg.HomeID, AutoAdopt: cfg.AutoAdopt, CA: homeCA})
 
+	// First-boot setup AP: while the device is unclaimed (setup not complete) it
+	// broadcasts a known, label-printable SSID serving its open management API,
+	// so a companion app can reach it before it has joined any network. It is
+	// torn down once setup completes (see the WithSetupCompleteHook below).
+	setupAP := setupap.New(uciClient, setupap.Config{
+		Radio: cfg.SetupAPRadio,
+		Key:   cfg.SetupAPKey,
+	})
+
 	// Topology collector: batman-adv link quality + hostapd client RSSI.
 	ubusClient, err := ubus.NewClient(ubus.Options{SocketPath: cfg.UbusSocket, BinaryPath: cfg.UbusBinary})
 	if err != nil {
@@ -121,6 +131,10 @@ func main() {
 		api.WithSelfHome(cfg.HomeID),
 		api.WithTopology(collector),
 		api.WithSignalSource(wifiClients),
+		api.WithSetupCompleteHook(func(ctx context.Context) error {
+			// Device is now claimed: take down the first-boot setup AP.
+			return setupAP.Disable(ctx)
+		}),
 		api.WithScanner(func(context.Context) ([]discovery.Announcement, error) {
 			// Answer from the passively-maintained cache, dropping this
 			// device's own Home.
@@ -213,6 +227,29 @@ func main() {
 		// aggregation.
 		go reportTopologyLoop(ctx, collector, id.NodeID(), cfg.Join, meshClients, 15*time.Second)
 	}
+
+	// Bring up the first-boot setup AP while the device is unclaimed, so a
+	// companion app can reach the open management API before the device has
+	// joined any network. Best-effort: a device without radios (e.g. a wired
+	// controller) simply logs and carries on.
+	go func() {
+		if !cfg.SetupAPEnabled {
+			return
+		}
+		complete, err := store.GetSetupComplete(ctx)
+		if err != nil {
+			log.Printf("setup-ap: read setup state failed: %v", err)
+			return
+		}
+		if complete {
+			return
+		}
+		if err := setupAP.Enable(ctx, id.NodeID()); err != nil {
+			log.Printf("setup-ap: enable failed (non-fatal): %v", err)
+			return
+		}
+		log.Printf("setup AP up: ssid=%s", setupAP.SSID(id.NodeID()))
+	}()
 
 	<-ctx.Done()
 	log.Println("shutting down meshd")

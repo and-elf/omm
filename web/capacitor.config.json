@@ -1,0 +1,8 @@
+{
+  "appId": "com.openwrtmeshmanager.companion",
+  "appName": "OMM",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http"
+  }
+}

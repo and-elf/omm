@@ -43,6 +43,23 @@ func TestConfigCombinedWhenHTTPAddrSet(t *testing.T) {
 	}
 }
 
+func TestSetupAPDefaultsOnAndCanBeDisabled(t *testing.T) {
+	clearAddrEnv(t)
+
+	t.Setenv("MESHD_SETUP_AP", "")
+	if c := Load(); !c.SetupAPEnabled {
+		t.Fatal("expected setup AP enabled by default")
+	}
+	if c := Load(); c.SetupAPRadio != "radio0" {
+		t.Fatalf("SetupAPRadio default = %q, want radio0", c.SetupAPRadio)
+	}
+
+	t.Setenv("MESHD_SETUP_AP", "0")
+	if c := Load(); c.SetupAPEnabled {
+		t.Fatal("expected setup AP disabled when MESHD_SETUP_AP=0")
+	}
+}
+
 func TestConfigAddrOverrides(t *testing.T) {
 	clearAddrEnv(t)
 	t.Setenv("MESHD_MGMT_ADDR", "127.0.0.1:9000")

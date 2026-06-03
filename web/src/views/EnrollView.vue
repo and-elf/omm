@@ -4,8 +4,8 @@ import { onMounted, ref } from 'vue'
 import { api, ApiClient } from '@/api/client'
 import AsyncSection from '@/components/AsyncSection.vue'
 import { useAsync } from '@/composables/useAsync'
+import { useDiscovery } from '@/composables/useDiscovery'
 import { formatLastSeen } from '@/utils/format'
-import type { DiscoveredController } from '@/types'
 
 const props = withDefaults(defineProps<{ client?: ApiClient }>(), {
   client: () => api,
@@ -30,9 +30,16 @@ async function act(fn: () => Promise<unknown>) {
   }
 }
 
-// Discover nearby Homes to join (instead of typing a URL).
-const found = ref<DiscoveredController[] | null>(null)
-const scanning = ref(false)
+// Discover nearby Homes to join (instead of typing a URL). useDiscovery prefers
+// native mDNS when the app runs in a native shell and falls back to the daemon's
+// /scan; `source` records which path answered.
+const {
+  controllers: found,
+  source: discoverySource,
+  scanning,
+  error: scanError,
+  discover,
+} = useDiscovery(props.client)
 const joiningApi = ref<string | null>(null)
 const joinMessage = ref<string | null>(null)
 const joinError = ref<string | null>(null)
@@ -40,16 +47,9 @@ const showManual = ref(false)
 const manualUrl = ref('')
 
 async function scan() {
-  scanning.value = true
   joinError.value = null
   joinMessage.value = null
-  try {
-    found.value = await props.client.scanHomes()
-  } catch (err) {
-    joinError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    scanning.value = false
-  }
+  await discover()
 }
 
 async function join(controllerUrl: string) {
@@ -122,6 +122,11 @@ onMounted(run)
         </button>
       </div>
 
+      <p v-if="scanError" class="form__error" role="alert">{{ scanError }}</p>
+
+      <p v-if="found && found.length && discoverySource" class="form__hint" data-test="discovery-source">
+        Found via {{ discoverySource === 'mdns' ? 'mDNS (on-network)' : 'the daemon’s scan' }}.
+      </p>
       <table v-if="found && found.length" class="table" style="margin-top: 0.75rem">
         <thead>
           <tr><th>Home</th><th>Controller</th><th></th></tr>

@@ -204,5 +204,18 @@ export function createApi(): ApiClient {
   return new ApiClient()
 }
 
+/**
+ * Builds a client targeting a specific device over the LAN — an unclaimed node
+ * at its setup-AP address (e.g. `http://192.168.254.1:8080`) or a controller's
+ * announced `api` URL — rather than the same origin. The companion app uses
+ * this to reach a device it is not itself served by. A custom `fetchFn` lets
+ * the native shell supply a CORS-free transport (a browser PWA is subject to
+ * the device's CORS policy).
+ */
+export function createRemoteApi(baseUrl: string, fetchFn?: FetchFn): ApiClient {
+  const normalized = baseUrl.trim().replace(/\/+$/, '')
+  return new ApiClient(normalized, fetchFn ?? fetch.bind(globalThis))
+}
+
 /** Shared client instance, selected for the runtime environment. */
 export const api = createApi()

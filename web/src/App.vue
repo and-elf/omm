@@ -14,6 +14,7 @@ const links = [
   { to: '/', label: 'Dashboard' },
   { to: '/homes', label: 'Homes' },
   { to: '/enroll', label: 'Enroll' },
+  { to: '/onboard', label: 'Add Node' },
   { to: '/nodes', label: 'Nodes' },
   { to: '/topology', label: 'Topology' },
   { to: '/settings', label: 'Settings' },

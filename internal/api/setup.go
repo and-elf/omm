@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +44,14 @@ func (h *apiHandler) completeSetup(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.SetSetupComplete(r.Context(), true); err != nil {
 		respondError(w, http.StatusInternalServerError, err)
 		return
+	}
+	// The device is now claimed: tear down the first-boot setup AP if one is
+	// running. Best-effort — setup is already recorded complete, so a teardown
+	// failure must not fail the request.
+	if h.onSetupComplete != nil {
+		if err := h.onSetupComplete(r.Context()); err != nil {
+			log.Printf("setup-complete hook failed (non-fatal): %v", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"setup_complete": true})
 }

@@ -1,8 +1,9 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import EnrollView from './EnrollView.vue'
 import { ApiClient } from '@/api/client'
+import { resetNativeBridge, setNativeBridge, type NativeBridge } from '@/native'
 
 function clientWithPending(pending: unknown) {
   const fetchFn = (() =>
@@ -16,6 +17,8 @@ function clientWithPending(pending: unknown) {
 }
 
 describe('EnrollView', () => {
+  afterEach(() => resetNativeBridge())
+
   it('lists pending devices and approves one', async () => {
     const client = clientWithPending([
       { id: 'e1', node_id: 'abcdef0123456789aa', serial: 'SN1', status: 'pending_approval', created_at: 1 },
@@ -61,5 +64,35 @@ describe('EnrollView', () => {
 
     expect(join).toHaveBeenCalledWith('http://other:8080')
     expect(wrapper.text()).toContain('status: active')
+  })
+
+  it('discovers via native mDNS when available and labels the source', async () => {
+    const native: NativeBridge = {
+      isNative: true,
+      discovery: {
+        isAvailable: () => true,
+        discoverControllers: async () => [
+          { home_id: 'h2', name: 'Garage', controller_id: 'gw02', api: 'http://10.0.0.2:8080' },
+        ],
+      },
+      wifi: { isAvailable: () => false, joinNetwork: async () => {} },
+      qr: { isAvailable: () => false, scanSetupLabel: async () => ({ ssid: 'x' }) },
+    }
+    setNativeBridge(native)
+
+    const client = clientWithPending([])
+    // mDNS must win: the daemon scan must not be consulted.
+    const scan = vi.spyOn(client, 'scanHomes')
+
+    const wrapper = mount(EnrollView, { props: { client } })
+    await flushPromises()
+
+    await wrapper.find('[data-test="join-section"] .btn--primary').trigger('click')
+    await flushPromises()
+
+    expect(scan).not.toHaveBeenCalled()
+    expect(wrapper.findAll('[data-test="found-row"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Garage')
+    expect(wrapper.find('[data-test="discovery-source"]').text()).toContain('mDNS')
   })
 })

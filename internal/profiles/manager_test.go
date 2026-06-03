@@ -27,6 +27,16 @@ func (f *fakeUCI) Set(ctx context.Context, pkg, section, option, value string) e
 	return nil
 }
 
+func (f *fakeUCI) SetSection(ctx context.Context, pkg, section, sectionType string, values map[string]string) error {
+	f.ops = append(f.ops, "setsection:"+pkg)
+	return nil
+}
+
+func (f *fakeUCI) Delete(ctx context.Context, pkg, section string) error {
+	f.ops = append(f.ops, "delete:"+pkg)
+	return nil
+}
+
 func (f *fakeUCI) Commit(ctx context.Context, pkg string) error {
 	f.ops = append(f.ops, "commit:"+pkg)
 	return nil
