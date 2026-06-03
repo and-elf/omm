@@ -31,6 +31,7 @@ type apiHandler struct {
 	signals         SignalSource
 	scan            Scanner
 	meshClientAuth  bool
+	devCORS         bool
 	onSetupComplete func(ctx context.Context) error
 }
 
@@ -97,6 +98,28 @@ func WithSetupCompleteHook(hook func(ctx context.Context) error) Option {
 	return func(h *apiHandler) { h.onSetupComplete = hook }
 }
 
+// WithDevCORS adds permissive CORS headers (any origin) and answers preflight
+// OPTIONS on the management routes, so a companion app served from another
+// origin can call the API directly. Development only — the management API is
+// unauthenticated.
+func WithDevCORS() Option {
+	return func(h *apiHandler) { h.devCORS = true }
+}
+
+// devCORSMiddleware sets permissive CORS headers and short-circuits preflight.
+func devCORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // WithMeshClientAuth requires a verified mesh client certificate on the mesh
 // router's post-enrollment routes (everything except the bootstrap /enroll/*
 // endpoints, which a node reaches before it has a cert). Set this only when the
@@ -150,6 +173,9 @@ func newHandler(store storage.Store, profileManager profiles.ProfileManager, opt
 func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts ...Option) http.Handler {
 	r := chi.NewRouter()
 	h := newHandler(store, profileManager, opts...)
+	if h.devCORS {
+		r.Use(devCORSMiddleware)
+	}
 	// Management routes register GET /homes/{homeID} and the PWA catch-all; add
 	// only the mesh-plane routes that management does not already cover, to
 	// avoid duplicate (method, path) registrations.
@@ -171,7 +197,11 @@ func NewRouter(store storage.Store, profileManager profiles.ProfileManager, opts
 // localhost behind LuCI).
 func NewManagementRouter(store storage.Store, profileManager profiles.ProfileManager, opts ...Option) http.Handler {
 	r := chi.NewRouter()
-	newHandler(store, profileManager, opts...).registerManagementRoutes(r)
+	h := newHandler(store, profileManager, opts...)
+	if h.devCORS {
+		r.Use(devCORSMiddleware)
+	}
+	h.registerManagementRoutes(r)
 	return r
 }
 

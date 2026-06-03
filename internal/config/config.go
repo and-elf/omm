@@ -44,6 +44,12 @@ type Config struct {
 	SetupAPEnabled bool   // bring up the setup AP while unclaimed (default true)
 	SetupAPRadio   string // wifi-device hosting the setup AP (default radio0)
 	SetupAPKey     string // WPA2 passphrase for the setup AP; empty => open
+
+	// DevCORS adds permissive CORS headers to the management plane so a companion
+	// app served from another origin (e.g. a Vite dev server) can call it
+	// directly. Development only — the management API is unauthenticated, so this
+	// must never be enabled on a network-reachable deployment.
+	DevCORS bool
 }
 
 // Combined reports whether the daemon should serve a single server (both planes
@@ -90,6 +96,8 @@ func Load() Config {
 		SetupAPEnabled: envBoolOr("MESHD_SETUP_AP", true),
 		SetupAPRadio:   envOr("MESHD_SETUP_AP_RADIO", "radio0"),
 		SetupAPKey:     os.Getenv("MESHD_SETUP_AP_KEY"),
+
+		DevCORS: envBool("MESHD_DEV_CORS"),
 	}
 }
 

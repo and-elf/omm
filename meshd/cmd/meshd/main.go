@@ -149,6 +149,11 @@ func main() {
 		}),
 	}
 
+	if cfg.DevCORS {
+		log.Printf("WARNING: MESHD_DEV_CORS enabled — management API allows any origin (development only)")
+		apiOpts = append(apiOpts, api.WithDevCORS())
+	}
+
 	// Combined mode (MESHD_HTTP_ADDR set) serves both planes on one address over
 	// plain HTTP. Split mode binds the management plane (admin/UI) and the mesh
 	// control plane (node-to-node) separately, and the mesh plane runs mutual
