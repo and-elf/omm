@@ -22,6 +22,23 @@ export function resetNativeBridge(): void {
   bridge = webBridge
 }
 
+/**
+ * Activate the Capacitor bridge when running inside a native shell. No-op in a
+ * browser PWA (the web fallback stays active). Called once at app start. The
+ * Capacitor module is imported lazily so the browser bundle only loads it when
+ * this runs.
+ */
+export async function initNative(): Promise<void> {
+  try {
+    const { capacitorBridge } = await import('./capacitor')
+    if (capacitorBridge.isNative) {
+      setNativeBridge(capacitorBridge)
+    }
+  } catch {
+    // No native runtime available; keep the web fallback.
+  }
+}
+
 export type {
   NativeBridge,
   DiscoveryService,

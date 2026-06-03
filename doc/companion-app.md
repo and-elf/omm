@@ -313,8 +313,15 @@ The **unclaimed node** (PHASE 1–2) is always open — no auth needed there.
    torn down on `/setup/complete`), `MESHD_SETUP_AP*` config. Unit-tested **and**
    covered by a real-OpenWrt-container e2e (`TestSetupAPLifecycleE2E`) that
    asserts the uci sections appear on boot and are removed on setup completion.
-3. **M2 — discovery + remote context:** mDNS browse, remote-LAN API context,
-   "pick a Home" UI.
+3. **M2 — discovery + remote context:** ✅ *done.* `client.ts` gained
+   `createRemoteApi(baseUrl)` (target a node's setup-AP address or a controller's
+   announced URL); a `useDiscovery` composable that prefers native mDNS and falls
+   back to the daemon's `/scan`; a Capacitor bridge (`web/src/native/capacitor.ts`,
+   `@capacitor/core` + `registerPlugin('Zeroconf')`) registered at startup via
+   `initNative()`; and the Enroll view's "pick a Home" now native-aware with a
+   discovery-source badge. All unit-tested. *Pending (device-only):* the actual
+   `@capacitor-community/zeroconf` install + `npx cap add android/ios` and
+   on-device validation of the TXT-record mapping.
 4. **M3 — onboarding wizard:** QR-join → reach node → `/enroll/join` →
    adopt → confirm, end to end against §4's wired-uplink model.
 5. **M4 — controller auth:** LuCI `session.login` for split-mode controllers.

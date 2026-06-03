@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same Vue frontend builds as a browser PWA today and as a Capacitor-wrapped
   cross-platform app. See the design spec in
   [doc/companion-app.md](doc/companion-app.md).
+- **Companion-app discovery & remote targeting.** `createRemoteApi(baseUrl)` lets
+  the app talk to a specific device over the LAN (an unclaimed node's setup-AP
+  address or a controller's announced URL). A `useDiscovery` composable prefers
+  native mDNS (`_mesh._tcp` via a Capacitor `Zeroconf` plugin, wired through
+  `@capacitor/core`'s `registerPlugin`) and falls back to the daemon's `/scan`;
+  the Enroll screen's "join a Home" is now native-aware and labels the discovery
+  source. The Capacitor bridge activates only inside a native shell
+  (`initNative()`), so the browser PWA is unchanged.
 - **End-to-end test for the LuCI integration.** `TestLuCIWorkflowE2E` boots a
   real OpenWrt userland with the built `meshd` + `luci-app-meshd` packages and
   the full LuCI stack (ubusd + rpcd + uhttpd), then drives the operator

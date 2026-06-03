@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiClient, ApiError } from './client'
+import { ApiClient, ApiError, createRemoteApi } from './client'
 
 function mockFetch(response: {
   ok?: boolean
@@ -148,6 +148,15 @@ describe('ApiClient', () => {
       '/homes/h1',
       expect.objectContaining({ method: 'PUT', body: JSON.stringify({ name: 'Cottage' }) }),
     )
+  })
+
+  it('createRemoteApi targets a device base URL and strips trailing slashes', async () => {
+    const fetchFn = mockFetch({ json: { status: 'ready' } })
+    const client = createRemoteApi('http://192.168.254.1:8080/', fetchFn)
+
+    await client.getStatus()
+
+    expect(fetchFn).toHaveBeenCalledWith('http://192.168.254.1:8080/status', expect.any(Object))
   })
 
   it('throws an ApiError carrying the status code on failure', async () => {
