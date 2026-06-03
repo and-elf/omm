@@ -128,6 +128,10 @@ Three resolutions, in increasing complexity:
 **v1 picks (1).** (2) and (3) are tracked as follow-ups. This choice is the
 single most important constraint on the meshd setup-AP work in §5.
 
+> **Updated (v2, §13):** the current target is to **support both (1) and (2)**.
+> The wired path needs no new daemon code; the WiFi-station path adds a node-side
+> provisioning endpoint, specified in §13.4.
+
 ---
 
 ## 5. New meshd work — the first-boot setup AP
@@ -269,8 +273,9 @@ The **unclaimed node** (PHASE 1–2) is always open — no auth needed there.
    mgmt API of an unclaimed node) vs WPA2 with a label/QR password
    (recommended). The unclaimed mgmt API is unauthenticated, so an open setup AP
    = anyone in range can claim the node first → **lean WPA2 + QR**.
-2. **Onboarding connectivity model:** §4 picks wired uplink for v1. Confirm this
-   matches the intended user story before building the STA path.
+2. **Onboarding connectivity model:** ~~§4 picks wired uplink for v1.~~
+   **Resolved (v2, §13):** support both wired and WiFi-station; the STA path is
+   specified in §13.4 and is the main new backend cost of v2.
 3. **Desktop packaging:** Capacitor-Electron vs shipping desktop as the plain
    installable PWA (desktop rarely needs WiFi-join; mDNS may suffice).
 4. **iOS distribution:** `NEHotspotConfiguration` + local-network are fine for
@@ -346,5 +351,164 @@ The **unclaimed node** (PHASE 1–2) is always open — no auth needed there.
    steps, permissions, the mDNS gap (no Capacitor-8 plugin yet), and the manual
    verification matrix. *Pending (device-only):* generating the platforms,
    per-platform permissions, and walking the matrix on hardware.
-</content>
-</invoke>
+7. **M6 — v2 simplified onboarding** (see §13–§14).
+   - **Phase 1 (web): ✅ done.** [OnboardView](../web/src/views/OnboardView.vue)
+     restructured into the three input-light pages (home → device → run) with
+     auto-progressing steps and background adopt (no approve tap); Android-only
+     SSID picker wired through `wifi.scanNetworks`
+     ([capacitor.ts](../web/src/native/capacitor.ts)); all unit/component-tested.
+   - **Phase 2 (WiFi-station uplink): ✅ done (CI-level).** `setupap.EnableUplink`
+     authors a station wifi-iface + DHCP-client network and `Disable` tears it
+     down when provisioned ([setupap.go](../internal/setupap/setupap.go));
+     `POST /setup/uplink` (guarded to unclaimed) via `WithUplinkProvisioner`
+     ([setup.go](../internal/api/setup.go), [router.go](../internal/api/router.go)),
+     wired in the daemon ([main.go](../meshd/cmd/meshd/main.go)); web client
+     `provisionUplink` + a conditional `provisionUplink` step in `useOnboarding`
+     + the Page-2 wired/WiFi uplink selector. Unit-tested both sides.
+   - **e2e:** `TestSetupUplinkE2E`
+     ([setupap_e2e_test.go](../internal/e2e/setupap_e2e_test.go)) asserts
+     `/setup/uplink` authors the station wifi-iface + DHCP-client network on a
+     real OpenWrt userland and that `/setup/complete` tears them down. Compiles
+     under `-tags e2e` and `go vet` is clean; *running* it needs Docker + a
+     freshly-built `meshd.ipk` (`scripts/build.sh` + `package-ipk.sh`).
+   - *Pending:* the §13.4 reachability confirmation; §13.3 native
+     socket-binding/switch-state robustness (device-only); and on-device
+     verification of AP+STA concurrency.
+
+---
+
+## 13. v2 — Simplified, auto-progressing onboarding (current target)
+
+**Why.** The v1 UI (one dense "choose Home" form with many optional/disclosure
+fields, then a passive five-row step list) is fiddly and confusing. v2 keeps the
+*protocol* of §3 unchanged but restructures the *experience* so the operator only
+ever stops on a real decision.
+
+**Decisions taken (this design conversation).** These **supersede** the v1
+choices where noted; the protocol (§3) and the chicken-and-egg analysis (§4) are
+unchanged, only resolved differently.
+
+| Decision | v2 choice | Supersedes / extends |
+|----------|-----------|----------------------|
+| Node uplink during enrollment | **Support both** wired *and* WiFi-station | Supersedes §4's "v1 picks (1) wired only". WiFi-station needs new meshd work — §13.4 |
+| Adoption | **Manual approval, performed by the app in the background** via REST once it has a controller client — no user-visible approve step | Confirms §3 PHASE 3; still implies a second network switch (§13.2), but the app adopts automatically (it is *not* relying on `MESHD_AUTO_ADOPT` on the daemon) |
+| Device selection (PHASE 1) | **Android SSID picker** + QR/manual fallback (iOS/web) | Promotes §6.2's "Android-only convenience" scan to a first-class picker; QR stays primary on iOS |
+| UI cadence | **Input-gated pages with auto-progression** between them | Supersedes the §3/§9 single-form-plus-step-list UI |
+
+### 13.1 The governing constraint (restated, because the UI is built around it)
+
+A phone is on **one** WiFi network at a time, and the node↔controller enrollment
+is **daemon-to-daemon** — the phone cannot relay the handshake (the node signs
+the challenge with its own ECDSA key). Therefore the UI must **batch all
+home-network work, then all setup-AP work**, and make network switches the *only*
+heavyweight actions. Everything else (read identity, `/enroll/join`, poll, adopt,
+confirm) auto-advances with status, never a button.
+
+Two switches are unavoidable: home → setup-AP (to configure + trigger the node),
+then setup-AP → home (to adopt + confirm). The adopt is **not** a user action —
+the app, already holding a controller client from Page 1, calls
+`POST /nodes/{id}/adopt` in the background once it is back on the home network. It
+needs to return there because the token alone is useless from the isolated setup
+AP, which has no route to the controller. So: two switches, **zero approve taps**.
+
+### 13.2 Pages (a page = a real decision or input; steps in between auto-run)
+
+| Page | Phone is on | Operator does | Auto-runs underneath |
+|------|-------------|---------------|----------------------|
+| **1 — Choose Home & sign in** | Home WiFi | Pick a discovered Home (or enter its URL); for split-mode, enter controller (LuCI) sign-in | mDNS/UDP discovery (§3 PHASE 0); `connectController` resolves combined vs split posture (§8), holds controller URL + client/token |
+| **2 — Choose device** | Home WiFi → **switch #1** → setup-AP | Android: pick `OMM-Setup-*` from the picker. iOS/web: scan the label QR or enter manually. If the node will uplink over **WiFi**: enter the home WiFi password | Parse label (§M3 `parseSetupLabel`), join the setup AP (socket bound to it — §13.3), `GET /setup` → `node_id`/serial; if WiFi uplink, `POST /setup/uplink` (§13.4) then confirm the node has a route to the controller; `POST /enroll/join` → `pending_approval` |
+| **3 — Confirm** | setup-AP → **switch #2** → Home WiFi | *Nothing* — watches progress | Switch back, then in the background: `POST /nodes/{id}/adopt`, node acks → `active`, poll `GET /nodes` until it appears → **done** |
+
+Page 3 is therefore a confirmation/progress screen, not an input gate — only
+**Pages 1 and 2 collect input.** No "Next" button gates the auto-run rows; they
+render as live status with a single **Retry** affordance per failure.
+
+### 13.3 Network-switch robustness (must-have, or it's flaky in the field)
+
+1. **Bind the socket to the joined network** — Android `bindProcessToNetwork`
+   (the `WifiNetworkSpecifier` callback's `Network`), iOS scoped session.
+   Without this, the OS detects the setup AP as "no internet" and silently
+   reverts to cellular/another SSID, so calls to `192.168.254.1` fail
+   intermittently. This is the single highest-risk bug in v2.
+2. **Legible switch states.** Each `wifi.joinNetwork` may pop a system dialog and
+   take seconds; the auto-run UI must show explicit
+   "Connecting to OMM-Setup-xxxx…" / "Back on your home network…" states with a
+   manual retry. A stalled switch is the most common real-world failure and must
+   never look like a hang.
+
+### 13.4 New meshd work — node-side WiFi-station uplink provisioning
+
+Verified absent today: no `/setup/uplink` route, and `internal/setupap` only
+authors AP mode, not station mode. The WiFi-uplink half of "support both" is
+therefore net-new daemon work (the **wired** half needs none — the node already
+reaches the controller over the wire while the phone is on its AP).
+
+Spec for the new endpoint:
+
+- **`POST /setup/uplink { ssid, password }`** on the **unclaimed** node (open,
+  like the rest of the setup API). Brings up a WiFi **station** interface joined
+  to the home network, giving the node an uplink/route to the controller.
+- **Guard:** only while `unclaimed` (`setup_complete=false`); reject otherwise.
+- **Reversible & non-destructive:** author the STA via UCI alongside the existing
+  setup AP without clobbering operator wireless, and tear it down on
+  `/setup/complete` (the node's applied profile then owns its real config).
+- **Reachability confirmation (deferred):** after provisioning (or immediately,
+  for wired), the node should expose whether it can reach the chosen controller,
+  so the app can fail fast on Page 2 instead of after a doomed `/enroll/join`. Not
+  yet implemented — a station association takes seconds, so a synchronous check
+  would be racy; today the app surfaces failure on the subsequent `/enroll/join`.
+- **Boundaries:** consistent with §5 — meshd *orchestrates* OpenWrt (UCI wireless)
+  rather than reimplementing it.
+
+### 13.5 Mapping onto existing code
+
+- **`useOnboarding`** ([web/src/composables/useOnboarding.ts](../web/src/composables/useOnboarding.ts)):
+  add an `uplink: 'wired' | 'wifi'` option and home-WiFi credentials; insert a
+  conditional `provisionUplink` step (calls `POST /setup/uplink`) between
+  `connectNode` and `enroll`, skipped for wired. The existing `confirmAdoption`
+  poll already models manual approval; keep it. Steps stay, but the *view* stops
+  gating them.
+- **`OnboardView`** ([web/src/views/OnboardView.vue](../web/src/views/OnboardView.vue)):
+  split the single form into the three pages of §13.2 (sub-components or a small
+  wizard with an auto-advancing current-page index). The current dense
+  disclosure fields (manual creds, node URL, controller auth) move to where they
+  belong per page (auth → Page 1, manual creds/SSID picker → Page 2).
+- **Native bridge** ([web/src/native/types.ts](../web/src/native/types.ts)):
+  `WifiService.scanNetworks?()` already exists (Android-only); Page 2's picker
+  consumes it and filters to `OMM-Setup-*`, with QR/manual when it's absent.
+
+---
+
+## 14. v2 test strategy (TDD: red → green → refactor)
+
+Extends §11. Write the failing test first in every case.
+
+**`useOnboarding` (Vitest, native + clients mocked via the existing DI):**
+- `uplink: 'wifi'` → calls `POST /setup/uplink {ssid,password}` on the node
+  before `/enroll/join`; `uplink: 'wired'` (default) → never calls it.
+- WiFi uplink with a node that reports the controller unreachable → fails fast on
+  the provision step with a clear error, before `/enroll/join`.
+- Steps `connectNode → (provisionUplink) → enroll → adopt` advance with **no**
+  external trigger between them (auto-progression), asserted on `step` refs.
+- Manual approval: `confirmAdoption` polls pending → `adoptNode` → `active`
+  (existing test retained; assert it is the only path under manual approval).
+
+**Page components (Vitest + Vue Test Utils):**
+- Pages 1 and 2 are gated on their own input (Page 1 needs a chosen Home; Page 2
+  needs device identity). Page 3 is a confirmation screen with no input — the
+  adopt runs in the background, no approve tap.
+- Between-page auto-run rows render as status, not buttons; a failed row shows a
+  single Retry.
+- Android (`scanNetworks` present) → SSID picker lists `OMM-Setup-*`; iOS/web
+  (absent) → QR/manual path shown instead.
+- WiFi-uplink selection reveals the home-WiFi-password field; wired hides it.
+
+**meshd `POST /setup/uplink` (Go):**
+- Table-driven UCI-authoring unit tests (no device) for the STA section.
+- Rejected when the device is not `unclaimed`.
+- e2e in the real-OpenWrt-container harness: unclaimed node + setup AP, `POST
+  /setup/uplink` → STA section appears and the node gains an uplink route; torn
+  down on `/setup/complete`.
+
+**Contract:** the app calls exactly §7's endpoints **plus** `POST /setup/uplink`,
+with the documented bodies, keeping app and daemon in lock-step.
