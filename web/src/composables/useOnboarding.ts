@@ -13,7 +13,15 @@ export const NODE_SETUP_URL = 'http://192.168.254.1:8080'
  * `enroll` tells the node to join the chosen Home, and `adopt` confirms the
  * controller has adopted it.
  */
-export type OnboardStep = 'idle' | 'scan' | 'joinWifi' | 'connectNode' | 'enroll' | 'adopt' | 'done'
+export type OnboardStep =
+  | 'idle'
+  | 'scan'
+  | 'joinWifi'
+  | 'connectNode'
+  | 'provisionUplink'
+  | 'enroll'
+  | 'adopt'
+  | 'done'
 
 export interface OnboardOptions {
   /** The target Home's controller API URL (chosen before joining the setup AP). */
@@ -22,6 +30,14 @@ export interface OnboardOptions {
   credentials?: SetupCredentials
   /** The unclaimed node's management URL (defaults to the setup-AP gateway). */
   nodeUrl?: string
+  /**
+   * How the node reaches the controller while it enrolls. 'wired' (default)
+   * assumes the node already has a route (Ethernet uplink). 'wifi' provisions a
+   * station uplink on the node from `homeWifi` first, for an un-wired node.
+   */
+  uplink?: 'wired' | 'wifi'
+  /** Home-WiFi credentials pushed to the node when `uplink` is 'wifi'. */
+  homeWifi?: { ssid: string; password?: string }
   /** Builds a client for a base URL (injectable for tests). */
   createClient?: (baseUrl: string) => ApiClient
   /**
@@ -104,6 +120,16 @@ export function useOnboarding(opts: OnboardOptions): UseOnboarding {
       const nodeClient = createClient(nodeUrl)
       const setup = await nodeClient.getSetup()
       nodeId.value = setup.node_id
+
+      // 3b. For a wireless-only node, provision a station uplink so it can reach
+      // the controller; a wired node already has a route and skips this.
+      if (opts.uplink === 'wifi') {
+        step.value = 'provisionUplink'
+        if (!opts.homeWifi?.ssid) {
+          throw new Error('a home WiFi network is required for a wireless uplink')
+        }
+        await nodeClient.provisionUplink(opts.homeWifi.ssid, opts.homeWifi.password)
+      }
 
       // 4. Tell the node to enroll into the chosen Home.
       step.value = 'enroll'

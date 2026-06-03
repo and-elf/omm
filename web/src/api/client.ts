@@ -167,6 +167,16 @@ export class ApiClient {
       body: JSON.stringify({ controller_url: controllerUrl, serial: serial ?? '' }),
     })
   }
+
+  // provisionUplink hands an unclaimed node home-WiFi credentials so it can join
+  // the home network as a station and reach its controller — wireless-only
+  // onboarding for un-wired nodes (POST /setup/uplink).
+  provisionUplink(ssid: string, password?: string): Promise<{ provisioned: boolean }> {
+    return this.request<{ provisioned: boolean }>('/setup/uplink', {
+      method: 'POST',
+      body: JSON.stringify({ ssid, password: password ?? '' }),
+    })
+  }
 }
 
 // __MESHD_UBUS__ is injected by the LuCI host page when the PWA is served

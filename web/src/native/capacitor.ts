@@ -79,6 +79,9 @@ const discovery: DiscoveryService = {
 interface WifiConnectPlugin {
   connect(opts: { ssid: string }): Promise<{ value: boolean }>
   secureConnect(opts: { ssid: string; password: string }): Promise<{ value: boolean }>
+  // Scan is Android-only (iOS has no public WiFi-scan API). Returns nearby
+  // networks; absent/unsupported elsewhere.
+  scan?(): Promise<{ networks?: { ssid: string; bssid?: string }[] }>
 }
 const WifiConnect = registerPlugin<WifiConnectPlugin>('CapacitorWifiConnect')
 
@@ -91,6 +94,17 @@ const wifi: WifiService = {
       await WifiConnect.connect({ ssid })
     }
   },
+  // Only Android can enumerate nearby SSIDs (needs ACCESS_FINE_LOCATION). The
+  // onboarding wizard uses this to offer a setup-AP picker; it is omitted on
+  // iOS/web so the UI falls back to the QR-label path.
+  ...(Capacitor.getPlatform() === 'android'
+    ? {
+        async scanNetworks() {
+          const { networks } = await WifiConnect.scan!()
+          return (networks ?? []).map((n) => ({ ssid: n.ssid, bssid: n.bssid }))
+        },
+      }
+    : {}),
 }
 
 // QR-label scan — provided on device by a barcode plugin (e.g.
