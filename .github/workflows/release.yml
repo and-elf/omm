@@ -189,7 +189,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Capacitor 8's CLI requires Node >=22; Node 20 aborts `cap` with a
+          # fatal engine error. Only this job runs the Capacitor CLI, so the
+          # other jobs stay on 20.
+          node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
       - uses: actions/setup-java@v4
