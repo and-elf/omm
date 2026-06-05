@@ -14,25 +14,106 @@ type ProfileManager interface {
 	ApplyProfileForHome(ctx context.Context, homeID string) error
 }
 
+const (
+	// Dedicated section names so authoring a home's wireless never disturbs an
+	// operator's own wifi-iface sections (matching the setupap convention). UCI
+	// section names allow [A-Za-z0-9_] only, hence no hyphen.
+	meshSection = "omm_mesh"
+	apSection   = "omm_ap"
+)
+
+// Config tunes how a profile is applied to UCI.
+type Config struct {
+	// Radio is the wifi-device that hosts the home's mesh + client AP
+	// (default "radio0").
+	Radio string
+}
+
+func (c Config) withDefaults() Config {
+	if c.Radio == "" {
+		c.Radio = "radio0"
+	}
+	return c
+}
+
 type Manager struct {
 	store     storage.Store
 	uciClient uci.Client
+	cfg       Config
 }
 
-func NewManager(store storage.Store, uciClient uci.Client) ProfileManager {
-	return &Manager{store: store, uciClient: uciClient}
+func NewManager(store storage.Store, uciClient uci.Client, cfg Config) ProfileManager {
+	return &Manager{store: store, uciClient: uciClient, cfg: cfg.withDefaults()}
 }
 
+// ApplyProfile authors the home's wireless from scratch and applies it. It
+// creates (not just updates) the sections it owns, so it works on a stock
+// device that has no meshd wireless yet — the earlier "apply profile: not
+// found" was a plain `uci set` against a non-existent `mesh` section.
+//
+// Two interfaces are authored on the configured radio, both attached to `lan`
+// so meshed nodes and AP clients share the controller's existing LAN and its
+// DHCP:
+//   - omm_mesh: the 802.11s backhaul (mesh_id = MeshSSID), so other nodes mesh in.
+//   - omm_ap:   a client-facing AP (ssid = APSSID, defaulting to MeshSSID), so
+//     phones/laptops can join and get an address.
+//
+// Each section is only authored when its SSID is set; absent both, the radio is
+// left untouched.
 func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) error {
-	if profile.MeshSSID != "" {
-		if err := m.uciClient.Set(ctx, "wireless", "mesh", "ssid", profile.MeshSSID); err != nil {
-			return fmt.Errorf("set mesh ssid: %w", err)
-		}
+	// The client AP reuses the mesh SSID/key unless given explicit overrides,
+	// so a mesh-only profile still yields a usable AP.
+	apSSID, apKey := profile.APSSID, profile.APKey
+	if apSSID == "" {
+		apSSID, apKey = profile.MeshSSID, profile.MeshKey
 	}
 
-	if profile.MeshKey != "" {
-		if err := m.uciClient.Set(ctx, "wireless", "mesh", "key", profile.MeshKey); err != nil {
-			return fmt.Errorf("set mesh key: %w", err)
+	wireless := false
+
+	if profile.MeshSSID != "" {
+		mesh := map[string]string{
+			"device":  m.cfg.Radio,
+			"mode":    "mesh",
+			"mesh_id": profile.MeshSSID,
+			"network": "lan",
+		}
+		// 802.11s authenticates with SAE; an empty key leaves the mesh open.
+		if profile.MeshKey != "" {
+			mesh["encryption"] = "sae"
+			mesh["key"] = profile.MeshKey
+		} else {
+			mesh["encryption"] = "none"
+		}
+		if err := m.uciClient.SetSection(ctx, "wireless", meshSection, "wifi-iface", mesh); err != nil {
+			return fmt.Errorf("set mesh wifi-iface: %w", err)
+		}
+		wireless = true
+	}
+
+	if apSSID != "" {
+		ap := map[string]string{
+			"device":  m.cfg.Radio,
+			"mode":    "ap",
+			"ssid":    apSSID,
+			"network": "lan",
+		}
+		if apKey != "" {
+			ap["encryption"] = "psk2"
+			ap["key"] = apKey
+		} else {
+			ap["encryption"] = "none"
+		}
+		if err := m.uciClient.SetSection(ctx, "wireless", apSection, "wifi-iface", ap); err != nil {
+			return fmt.Errorf("set ap wifi-iface: %w", err)
+		}
+		wireless = true
+	}
+
+	// A fresh OpenWrt radio ships disabled; enable it or neither interface
+	// ever starts.
+	if wireless {
+		if err := m.uciClient.Set(ctx, "wireless", m.cfg.Radio, "disabled", "0"); err != nil {
+			return fmt.Errorf("enable radio: %w", err)
 		}
 	}
 
@@ -50,8 +131,8 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 		return fmt.Errorf("commit system: %w", err)
 	}
 
-	// Commits only stage the config files; reload netifd so the new mesh
-	// settings actually take effect on the running system.
+	// Commits only stage the config files; reload so the new wireless actually
+	// takes effect on the running system.
 	if err := m.uciClient.Reload(ctx); err != nil {
 		return fmt.Errorf("reload config: %w", err)
 	}

@@ -21,6 +21,10 @@ export interface Profile {
   node_name: string
   mesh_ssid: string
   mesh_key: string
+  // Optional client-AP overrides. When omitted, the controller broadcasts a
+  // client AP using mesh_ssid/mesh_key.
+  ap_ssid?: string
+  ap_key?: string
   vlans: string[] | null
 }
 
