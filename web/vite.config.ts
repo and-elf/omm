@@ -61,7 +61,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      [API_PROXY_RE]: { target: API_TARGET, changeOrigin: true },
+      // secure:false lets the proxy talk to a daemon serving its own
+      // self-signed TLS cert — e.g. pointing MESHD_API_TARGET at a real
+      // device's https mesh listener (https://<device>:8081) during dev.
+      [API_PROXY_RE]: { target: API_TARGET, changeOrigin: true, secure: false },
     },
   },
 })
