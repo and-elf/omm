@@ -44,7 +44,7 @@ Package: $pkgname
 Version: $version
 Architecture: $arch
 Maintainer: and-elf <noreply@example.com>
-Depends: meshd, curl
+Depends: meshd
 Description: LuCI support for OpenWrt Mesh Manager (meshd)
 EOF
 

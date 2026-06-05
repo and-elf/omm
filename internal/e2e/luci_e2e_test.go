@@ -46,6 +46,10 @@ set -e
 mkdir -p /var/lock /var/run /var/run/ubus /usr/libexec/rpcd /usr/share/rpcd/acl.d /etc/meshd /www
 opkg update >/dev/null 2>&1
 opkg install uhttpd uhttpd-mod-ubus curl >/dev/null 2>&1 || { echo "FAIL: feed install"; exit 1; }
+# The rpcd plugin talks to meshd via nc; curl above is only for this harness's
+# readiness probe. Ensure nc exists (busybox usually provides it; install the
+# netcat package as a fallback) so the plugin path is what's exercised.
+command -v nc >/dev/null 2>&1 || opkg install netcat >/dev/null 2>&1 || { echo "FAIL: no nc for plugin"; exit 1; }
 opkg install /tmp/meshd.ipk >/dev/null 2>&1 || { echo "FAIL: meshd ipk install"; exit 1; }
 opkg install /tmp/luci-app-meshd.ipk >/dev/null 2>&1 || { echo "FAIL: luci-app-meshd ipk install"; exit 1; }
 

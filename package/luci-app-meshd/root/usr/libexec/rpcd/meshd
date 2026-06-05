@@ -14,12 +14,46 @@
 
 MESHD_URL="${MESHD_URL:-http://127.0.0.1:8080}"
 
-# No -f: on an HTTP error meshd still returns a JSON `{"error": "..."}` body,
-# and we want that body to flow back to the PWA (which surfaces data.error) so
-# the user sees the real reason. With -f, curl would exit non-zero and emit
-# nothing, leaving rpcd to report a bare, meaningless ubus status (e.g. 5).
-get() { curl -sS "$MESHD_URL$1"; }
-send() { printf '%s' "$3" | curl -sS -X "$1" -H 'Content-Type: application/json' --data-binary @- "$MESHD_URL$2"; }
+# Talk to meshd with busybox `nc` rather than curl: curl is not in OpenWrt's
+# default image and pulling it needs a feed, which breaks offline installs.
+# nc is always present (busybox), and meshd's API lives on localhost, so a
+# plain HTTP/1.0 request is all we need. uclient-fetch/wget can't be used here
+# because the API uses PUT/DELETE, which they don't support.
+#
+# Split MESHD_URL (http://host:port) into host/port for nc's positional args.
+_hostport="${MESHD_URL#http://}"
+_hostport="${_hostport%%/*}"
+case "$_hostport" in
+*:*) MESHD_HOST="${_hostport%%:*}"; MESHD_PORT="${_hostport##*:}" ;;
+*)   MESHD_HOST="$_hostport"; MESHD_PORT=80 ;;
+esac
+
+# Strip the HTTP response headers, emitting only the body. Headers end at the
+# first blank (CRLF) line; everything after it is meshd's JSON. We never gate
+# on the status code: on an HTTP error meshd still returns a JSON
+# `{"error":"..."}` body, and we want that body to flow back to the PWA (which
+# surfaces data.error) so the user sees the real reason rather than a bare,
+# meaningless ubus status (e.g. 5).
+_strip_headers() { awk 'body{print;next} /^\r?$/{body=1}'; }
+
+# http_req METHOD PATH BODY: issue one request and print meshd's response body.
+# Connection: close makes meshd close the socket after responding, so nc reads
+# the full response and exits cleanly. Content-Length is byte-counted (wc -c)
+# so a multi-byte UTF-8 body (e.g. a home name) is framed correctly; without it
+# Go's net/http treats the request as having no body.
+http_req() {
+	{
+		printf '%s %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n' "$1" "$2" "$MESHD_HOST"
+		if [ -n "$3" ]; then
+			printf 'Content-Type: application/json\r\nContent-Length: %s\r\n' "$(printf '%s' "$3" | wc -c)"
+		fi
+		printf '\r\n'
+		[ -n "$3" ] && printf '%s' "$3"
+	} | nc "$MESHD_HOST" "$MESHD_PORT" | _strip_headers
+}
+
+get() { http_req GET "$1" ""; }
+send() { http_req "$1" "$2" "$3"; }
 
 # json_str extracts a flat string field ($1) from the JSON in $2. Deliberately
 # avoids jshn so the plugin is portable and testable off-OpenWrt; meshd only
