@@ -57,6 +57,10 @@ export class ApiClient {
       throw new ApiError(res.status, message)
     }
 
+    // 204 No Content (e.g. a successful DELETE) carries no body to parse.
+    if (res.status === 204) {
+      return undefined as T
+    }
     return (await res.json()) as T
   }
 
@@ -102,6 +106,12 @@ export class ApiClient {
       method: 'PUT',
       body: JSON.stringify(fields),
     })
+  }
+
+  // deleteHome forgets a Home and everything scoped to it. The daemon refuses
+  // (409) to delete the currently-active Home — switch active first.
+  deleteHome(homeId: string): Promise<void> {
+    return this.request<void>(`/homes/${encodeURIComponent(homeId)}`, { method: 'DELETE' })
   }
 
   getNode(nodeId: string): Promise<Node> {

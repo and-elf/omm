@@ -42,6 +42,7 @@ const ROUTES: Route[] = [
   { method: 'POST', re: /^\/homes\/([^/]+)\/profile$/, ubus: 'save_profile', args: (c, b) => ({ ...b, home_id: dec(c[0]) }) },
   { method: 'GET', re: /^\/homes\/([^/]+)$/, ubus: 'get_home', args: (c) => ({ home_id: dec(c[0]) }) },
   { method: 'PUT', re: /^\/homes\/([^/]+)$/, ubus: 'update_home', args: (c, b) => ({ ...b, home_id: dec(c[0]) }) },
+  { method: 'DELETE', re: /^\/homes\/([^/]+)$/, ubus: 'delete_home', args: (c) => ({ home_id: dec(c[0]) }) },
   { method: 'GET', re: /^\/nodes$/, ubus: 'nodes' },
   { method: 'POST', re: /^\/nodes\/([^/]+)\/adopt$/, ubus: 'adopt_node', args: (c) => ({ node_id: dec(c[0]) }) },
   { method: 'POST', re: /^\/nodes\/([^/]+)\/reject$/, ubus: 'reject_node', args: (c) => ({ node_id: dec(c[0]) }) },

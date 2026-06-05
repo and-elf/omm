@@ -5,6 +5,7 @@ import { RouterLink } from 'vue-router'
 import { api, ApiClient } from '@/api/client'
 import AsyncSection from '@/components/AsyncSection.vue'
 import { useAsync } from '@/composables/useAsync'
+import type { Home } from '@/types'
 import { formatLastSeen } from '@/utils/format'
 
 const props = withDefaults(defineProps<{ client?: ApiClient }>(), {
@@ -52,6 +53,23 @@ async function setActive(id: string) {
   activeHome.value = id
 }
 
+const rowError = ref<string | null>(null)
+
+// The daemon refuses to delete the active home (409); the button is disabled
+// for it, and we confirm first since deletion also drops the home's profile.
+async function removeHome(home: Home) {
+  if (!window.confirm(`Delete home "${home.name}"? This also removes its profile and cannot be undone.`)) {
+    return
+  }
+  rowError.value = null
+  try {
+    await props.client.deleteHome(home.id)
+    await refresh()
+  } catch (err) {
+    rowError.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
 onMounted(refresh)
 </script>
 
@@ -97,10 +115,24 @@ onMounted(refresh)
               <button v-else class="btn btn--small" @click="setActive(home.id)">Set active</button>
             </td>
             <td>{{ formatLastSeen(home.last_seen) }}</td>
-            <td><RouterLink :to="`/homes/${home.id}`" class="link">Profile →</RouterLink></td>
+            <td class="actions">
+              <RouterLink :to="`/homes/${home.id}`" class="link">Profile →</RouterLink>
+              <button
+                class="btn btn--small btn--danger"
+                data-test="delete-home"
+                :disabled="home.id === activeHome"
+                :title="home.id === activeHome
+                  ? 'Switch to another home before deleting this one'
+                  : 'Delete this home'"
+                @click="removeHome(home)"
+              >
+                Delete
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>
+      <p v-if="rowError" class="form__error" role="alert">{{ rowError }}</p>
     </AsyncSection>
   </section>
 </template>
