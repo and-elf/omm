@@ -96,6 +96,7 @@ real, signed apk packages — trust the published key once, then install directl
 ```sh
 cp omm-apk.pub /etc/apk/keys/omm-apk.pub     # the maintainer's published EC key
 apk add ./meshd-<version>-<arch>.apk
+apk add ./luci-app-meshd-<version>-all.apk   # optional LuCI UI (noarch)
 ```
 
 (If the release is unsigned, add `--allow-untrusted`.) See
@@ -132,7 +133,7 @@ works as an apk feed too:
 ```sh
 cp omm-apk.pub /etc/apk/keys/omm-apk.pub     # trust the published key once
 echo 'https://github.com/and-elf/omm/releases/download/v0.2.0' >> /etc/apk/repositories.d/customfeeds.list
-apk update && apk add meshd
+apk update && apk add meshd luci-app-meshd   # luci-app-meshd is optional (LuCI UI)
 ```
 
 Build the single-binary product (frontend + daemon) locally with
