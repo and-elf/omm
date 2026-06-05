@@ -124,14 +124,28 @@ func (c *client) Commit(ctx context.Context, packageName string) error {
 }
 
 // Reload re-applies committed config to the running system: netifd reloads the
-// network interfaces and reconfigures the radios. Both calls return as soon as
-// netifd has accepted the request; the reconfiguration itself is asynchronous.
+// network interfaces, the radios are reconfigured, and a procd config.change
+// event makes the DHCP services re-read their config.
+//
+// The dhcp event is essential for the setup AP: netifd brings the interface up,
+// but the DHCP server (dnsmasq, plus odhcpd) only serves a freshly-committed
+// pool after it is told to reload — exactly what `/sbin/reload_config` emits on
+// a `uci commit`. Without it a client associates to the AP but never gets a
+// lease. The radios use bind-dynamic, so dnsmasq picks up the setup interface
+// even though netifd brings it up asynchronously after this returns.
 func (c *client) Reload(ctx context.Context) error {
 	if err := c.ubusClient.Call(ctx, "network", "reload", nil, nil); err != nil {
 		return fmt.Errorf("reload network: %w", err)
 	}
 	if err := c.ubusClient.Call(ctx, "network.wireless", "reconf", nil, nil); err != nil {
 		return fmt.Errorf("reconf wireless: %w", err)
+	}
+	dhcpEvent := map[string]interface{}{
+		"type": "config.change",
+		"data": map[string]string{"package": "dhcp"},
+	}
+	if err := c.ubusClient.Call(ctx, "service", "event", dhcpEvent, nil); err != nil {
+		return fmt.Errorf("reload dhcp services: %w", err)
 	}
 	return nil
 }

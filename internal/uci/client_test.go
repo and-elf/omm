@@ -167,8 +167,20 @@ func TestReload(t *testing.T) {
 	want := []ubusCall{
 		{object: "network", method: "reload"},
 		{object: "network.wireless", method: "reconf"},
+		{object: "service", method: "event"},
 	}
 	if !reflect.DeepEqual(fake.calls, want) {
-		t.Fatalf("expected network reload then wireless reconf, got %#v", fake.calls)
+		t.Fatalf("expected network reload, wireless reconf, then dhcp service event, got %#v", fake.calls)
+	}
+
+	// The service event must be a procd config.change for the dhcp package, so
+	// dnsmasq/odhcpd re-read config and serve the freshly-committed pool.
+	// Without it, a client associates to the setup AP but never gets a lease.
+	want_params := map[string]interface{}{
+		"type": "config.change",
+		"data": map[string]string{"package": "dhcp"},
+	}
+	if !reflect.DeepEqual(fake.lastParams, want_params) {
+		t.Fatalf("dhcp reload event params = %#v, want %#v", fake.lastParams, want_params)
 	}
 }
