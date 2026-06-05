@@ -60,6 +60,22 @@ func TestSetupAPDefaultsOnAndCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestUbusSocketEmptyByDefault(t *testing.T) {
+	// An empty default makes the ubus/uci CLI fall back to its own
+	// compiled-in socket path, which tracks the OpenWrt release. A
+	// hardcoded /var/run/ubus.sock broke on modern OpenWrt (socket moved to
+	// /var/run/ubus/ubus.sock) with "Failed to connect to ubus".
+	t.Setenv("MESHD_UBUS_SOCKET", "")
+	if c := Load(); c.UbusSocket != "" {
+		t.Fatalf("UbusSocket default = %q, want empty", c.UbusSocket)
+	}
+
+	t.Setenv("MESHD_UBUS_SOCKET", "/run/custom/ubus.sock")
+	if c := Load(); c.UbusSocket != "/run/custom/ubus.sock" {
+		t.Fatalf("UbusSocket override = %q, want /run/custom/ubus.sock", c.UbusSocket)
+	}
+}
+
 func TestConfigAddrOverrides(t *testing.T) {
 	clearAddrEnv(t)
 	t.Setenv("MESHD_MGMT_ADDR", "127.0.0.1:9000")
