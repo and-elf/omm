@@ -40,6 +40,28 @@ Configuration (UCI `meshd.main`, mapped to env):
 The discovery announcement carries the **mesh-facing** address, so joining nodes
 reach the control plane regardless of mode.
 
+## Status LED
+
+meshd drives a single status LED from the node's onboarding state so an
+installer can read it off the device without a companion app:
+
+| State | Condition | LED |
+|-------|-----------|-----|
+| Unclaimed | setup not complete | blinking (`timer` trigger) |
+| Enrolling | claimed, no active home yet | pulsing (`heartbeat` trigger) |
+| Active | active home applied | solid on |
+
+The LED is the kernel sysfs LED named by `led_name` (`MESHD_LED_NAME`, default
+`green:status`) under `/sys/class/leds/`. LED names are hardware-specific; if the
+configured LED is absent the daemon simply does nothing (no error), so the same
+build runs across boards. Set `led_enabled '0'` (`MESHD_LED=0`) to leave the LED
+alone.
+
+| UCI | Env | Default | Behaviour |
+|-----|-----|---------|-----------|
+| `led_enabled` | `MESHD_LED` | `1` | drive the status LED |
+| `led_name` | `MESHD_LED_NAME` | `green:status` | `/sys/class/leds/<name>` to drive |
+
 ## LuCI integration (`luci-app-meshd`)
 
 Lives under [`package/luci-app-meshd/`](../package/luci-app-meshd/):

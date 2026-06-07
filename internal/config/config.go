@@ -46,6 +46,11 @@ type Config struct {
 	SetupAPRadio   string // wifi-device hosting the setup AP (default radio0)
 	SetupAPKey     string // WPA2 passphrase for the setup AP; empty => open
 
+	// Status LED: blink while unclaimed, heartbeat while joining, solid once
+	// active. The name is hardware-specific; an absent LED is a graceful no-op.
+	LEDEnabled bool   // drive the status LED (default true)
+	LEDName    string // /sys/class/leds/<name> to drive (default "green:status")
+
 	// DevCORS adds permissive CORS headers to the management plane so a companion
 	// app served from another origin (e.g. a Vite dev server) can call it
 	// directly. Development only — the management API is unauthenticated, so this
@@ -103,6 +108,9 @@ func Load() Config {
 		SetupAPEnabled: envBoolOr("MESHD_SETUP_AP", true),
 		SetupAPRadio:   envOr("MESHD_SETUP_AP_RADIO", "radio0"),
 		SetupAPKey:     os.Getenv("MESHD_SETUP_AP_KEY"),
+
+		LEDEnabled: envBoolOr("MESHD_LED", true),
+		LEDName:    envOr("MESHD_LED_NAME", "green:status"),
 
 		DevCORS: envBool("MESHD_DEV_CORS"),
 	}

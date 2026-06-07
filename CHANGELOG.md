@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Topology view marks wired nodes with a solid border and wireless with a dashed
   one. Set the uplink interface with `MESHD_BACKHAUL_IFACE` (UCI `backhaul_iface`);
   empty => `unknown`. New `internal/topology/backhaul.go`.
+- **Status LED reflecting onboarding state.** `meshd` now drives a node's status
+  LED from its onboarding state so an installer can read it off the device
+  without a companion app: blinking while unclaimed, a heartbeat while it joins,
+  solid once a home is active. The LED is the kernel sysfs LED named by
+  `MESHD_LED_NAME` (UCI `led_name`, default `green:status`); a board lacking that
+  LED is a graceful no-op, so the same build runs unchanged across hardware. Set
+  `MESHD_LED=0` (UCI `led_enabled '0'`) to leave the LED alone. New
+  `internal/deviceled` package.
 
 ## [0.2.0] - 2026-06-03
 
