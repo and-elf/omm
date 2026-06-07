@@ -21,6 +21,13 @@ export function tqClass(tq: number): string {
   return 'weak'
 }
 
+/** Maps a node's backhaul type to a styling class (empty when unknown). */
+export function backhaulClass(backhaul?: string): string {
+  if (backhaul === 'ethernet') return 'node--eth'
+  if (backhaul === 'wireless') return 'node--wifi'
+  return ''
+}
+
 /**
  * Builds Cytoscape elements from a topology graph: mesh nodes, client nodes,
  * mesh links labelled with TQ, and client links labelled with RSSI.
@@ -29,10 +36,14 @@ export function toElements(topo: Topology): CyElement[] {
   const elements: CyElement[] = []
 
   for (const node of topo.nodes ?? []) {
+    const classes = ['node']
+    if (node.role === 'self') classes.push('node--self')
+    const bh = backhaulClass(node.backhaul)
+    if (bh) classes.push(bh)
     elements.push({
       group: 'nodes',
-      data: { id: node.id, label: node.label || node.id },
-      classes: node.role === 'self' ? 'node node--self' : 'node',
+      data: { id: node.id, label: node.label || node.id, backhaul: node.backhaul },
+      classes: classes.join(' '),
     })
   }
 

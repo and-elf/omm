@@ -15,8 +15,8 @@ describe('topology element builder', () => {
   it('builds nodes, links and client associations', () => {
     const els = toElements({
       nodes: [
-        { id: 'self', label: 'Gateway', role: 'self' },
-        { id: 'n2', label: 'n2', role: 'node' },
+        { id: 'self', label: 'Gateway', role: 'self', backhaul: 'ethernet' },
+        { id: 'n2', label: 'n2', role: 'node', backhaul: 'wireless' },
       ],
       links: [{ source: 'self', target: 'n2', tq: 210 }],
       clients: [{ mac: 'aa:bb', ap: 'self', signal: -55, band: '5GHz' }],
@@ -24,6 +24,11 @@ describe('topology element builder', () => {
 
     const self = els.find((e) => e.data.id === 'self')
     expect(self?.classes).toContain('node--self')
+    expect(self?.classes).toContain('node--eth')
+
+    const n2 = els.find((e) => e.data.id === 'n2')
+    expect(n2?.classes).toContain('node--wifi')
+    expect(n2?.data.backhaul).toBe('wireless')
 
     const link = els.find((e) => e.data.id === 'link:self->n2')
     expect(link?.group).toBe('edges')

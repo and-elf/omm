@@ -37,8 +37,9 @@ type Config struct {
 	Join        []string // controller URLs to enroll into on boot
 
 	// Topology collection.
-	BatmanIface  string   // batman-adv interface (e.g. bat0)
-	APInterfaces []string // hostapd interfaces to read clients from
+	BatmanIface   string   // batman-adv interface (e.g. bat0)
+	APInterfaces  []string // hostapd interfaces to read clients from
+	BackhaulIface string   // ethernet uplink interface used to classify backhaul (e.g. eth0); empty => unknown
 
 	// First-boot setup AP (brought up while the device is unclaimed).
 	SetupAPEnabled bool   // bring up the setup AP while unclaimed (default true)
@@ -95,8 +96,9 @@ func Load() Config {
 		Serial:      envOr("MESHD_SERIAL", hostnameOr("unknown")),
 		Join:        splitList(os.Getenv("MESHD_JOIN")),
 
-		BatmanIface:  envOr("MESHD_BATMAN_IFACE", "bat0"),
-		APInterfaces: splitList(os.Getenv("MESHD_AP_IFACES")),
+		BatmanIface:   envOr("MESHD_BATMAN_IFACE", "bat0"),
+		APInterfaces:  splitList(os.Getenv("MESHD_AP_IFACES")),
+		BackhaulIface: os.Getenv("MESHD_BACKHAUL_IFACE"),
 
 		SetupAPEnabled: envBoolOr("MESHD_SETUP_AP", true),
 		SetupAPRadio:   envOr("MESHD_SETUP_AP_RADIO", "radio0"),

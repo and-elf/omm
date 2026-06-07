@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Backhaul connection type in the topology graph.** Each node now reports how
+  it reaches the mesh — over a wired ethernet uplink or the wireless mesh —
+  derived from a configured uplink interface under `/sys/class/net`
+  (`carrier`/`operstate`). The value rides on the node's `self` vertex, is
+  preserved by the controller-side aggregator when that node is merged into the
+  mesh-wide graph, and surfaces as a `backhaul` field on a topology node; the
+  Topology view marks wired nodes with a solid border and wireless with a dashed
+  one. Set the uplink interface with `MESHD_BACKHAUL_IFACE` (UCI `backhaul_iface`);
+  empty => `unknown`. New `internal/topology/backhaul.go`.
+
 ## [0.2.0] - 2026-06-03
 
 ### Added

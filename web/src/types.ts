@@ -106,6 +106,8 @@ export interface TopologyNode {
   id: string
   label: string
   role: string
+  /** How this node reaches the mesh: 'ethernet' | 'wireless' | 'unknown'. */
+  backhaul?: string
 }
 
 export interface TopologyLink {
