@@ -9,7 +9,7 @@ start_service() {
 	config_load meshd
 
 	local role http_addr mgmt_addr mesh_addr database_path udp_listen home_id home_name controller_id
-	local auto_adopt controller_url identity_dir serial backhaul_iface led_enabled led_name
+	local auto_adopt controller_url identity_dir serial backhaul_iface led_enabled led_name auto_onboard_wired
 
 	config_get role main role controller
 	# When http_addr is set, meshd serves both planes on it (combined mode).
@@ -30,6 +30,7 @@ start_service() {
 	config_get backhaul_iface main backhaul_iface ""
 	config_get led_enabled main led_enabled 1
 	config_get led_name main led_name green:status
+	config_get auto_onboard_wired main auto_onboard_wired 0
 
 	procd_open_instance
 	procd_set_param command /usr/bin/meshd
@@ -49,7 +50,8 @@ start_service() {
 		MESHD_SERIAL="$serial" \
 		MESHD_BACKHAUL_IFACE="$backhaul_iface" \
 		MESHD_LED="$led_enabled" \
-		MESHD_LED_NAME="$led_name"
+		MESHD_LED_NAME="$led_name" \
+		MESHD_AUTO_ONBOARD_WIRED="$auto_onboard_wired"
 	procd_set_param respawn
 	procd_set_param stdout 1
 	procd_set_param stderr 1

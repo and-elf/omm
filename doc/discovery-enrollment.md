@@ -73,6 +73,25 @@ Join Existing Home
 Advanced OpenWrt Setup
 ```
 
+### Wired auto-onboard
+
+An unclaimed node that is **on the wire** can skip the wizard entirely. When
+`MESHD_AUTO_ONBOARD_WIRED` is enabled (UCI `auto_onboard_wired '1'`), the daemon
+watches for the conditions to onboard unattended: the node is still unclaimed,
+its ethernet backhaul is up (see `MESHD_BACKHAUL_IFACE` in
+[Topology](topology.md#backhaul-type)), and a controller other than its own Home
+has been discovered. When they all hold it enrolls into that controller — the
+lowest discovered `home_id`, chosen deterministically — applies the returned
+profile, marks setup complete and tears down the first-boot setup AP.
+
+It is **opt-in** (default off): a freshly-flashed node on an untrusted LAN should
+not silently join whatever controller happens to be announcing. It runs only
+when no explicit `MESHD_JOIN` controllers are configured, so it never races an
+operator's configured joins. And because completion is unattended, the join only
+finishes without a human when the **controller** auto-adopts (`MESHD_AUTO_ADOPT`
+on that controller); otherwise the node waits in `pending_approval` until an
+operator approves it.
+
 ---
 
 ## Create New Home
