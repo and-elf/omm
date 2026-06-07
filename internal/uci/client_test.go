@@ -156,6 +156,31 @@ func TestDelete(t *testing.T) {
 	}
 }
 
+func TestSections(t *testing.T) {
+	fake := &fakeUbusClient{response: map[string]interface{}{
+		"values": map[string]interface{}{
+			"radio0": map[string]interface{}{".type": "wifi-device", "band": "5g"},
+			// A list-valued option must be skipped, not error the whole call.
+			"@wifi-iface[0]": map[string]interface{}{".type": "wifi-iface", "list": []string{"a", "b"}},
+		},
+	}}
+	client := &client{ubusClient: fake}
+
+	got, err := client.Sections(context.Background(), "wireless")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got["radio0"][".type"] != "wifi-device" || got["radio0"]["band"] != "5g" {
+		t.Fatalf("radio0 options not parsed: %#v", got["radio0"])
+	}
+	if _, present := got["@wifi-iface[0]"]["list"]; present {
+		t.Fatalf("list-valued option should be skipped, got %#v", got["@wifi-iface[0]"])
+	}
+	if fake.lastObject != "uci" || fake.lastMethod != "get" {
+		t.Fatalf("expected uci.get, got %s.%s", fake.lastObject, fake.lastMethod)
+	}
+}
+
 func TestReload(t *testing.T) {
 	fake := &fakeUbusClient{}
 	client := &client{ubusClient: fake}

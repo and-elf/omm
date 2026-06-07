@@ -15,6 +15,11 @@ type Options struct {
 
 type Client interface {
 	Get(ctx context.Context, packageName, section, option string) (string, error)
+	// Sections returns every section of a config as name -> options. The option
+	// map includes the pseudo-keys ".type" and ".name". List-valued options are
+	// omitted (only scalar string values are returned), which is all the
+	// callers here need.
+	Sections(ctx context.Context, packageName string) (map[string]map[string]string, error)
 	Set(ctx context.Context, packageName, section, option, value string) error
 	// SetSection creates or updates a named section of the given type and sets
 	// all of its option values in one call. Use it to author a section that does
@@ -76,6 +81,32 @@ func (c *client) Get(ctx context.Context, packageName, section, option string) (
 	}
 
 	return str, nil
+}
+
+type uciSectionsResult struct {
+	Values map[string]map[string]json.RawMessage `json:"values"`
+}
+
+func (c *client) Sections(ctx context.Context, packageName string) (map[string]map[string]string, error) {
+	var result uciSectionsResult
+	if err := c.ubusClient.Call(ctx, "uci", "get", map[string]string{"config": packageName}, &result); err != nil {
+		return nil, err
+	}
+
+	out := make(map[string]map[string]string, len(result.Values))
+	for name, options := range result.Values {
+		opts := make(map[string]string, len(options))
+		for key, raw := range options {
+			// Keep only scalar string options; list values (e.g. `list`) fail
+			// to unmarshal into a string and are skipped.
+			var s string
+			if err := json.Unmarshal(raw, &s); err == nil {
+				opts[key] = s
+			}
+		}
+		out[name] = opts
+	}
+	return out, nil
 }
 
 func (c *client) Set(ctx context.Context, packageName, section, option, value string) error {

@@ -28,6 +28,10 @@ func (r *recordingUCI) Get(ctx context.Context, pkg, section, option string) (st
 	return "", nil
 }
 
+func (r *recordingUCI) Sections(ctx context.Context, pkg string) (map[string]map[string]string, error) {
+	return nil, nil
+}
+
 func (r *recordingUCI) Set(ctx context.Context, pkg, section, option, value string) error {
 	r.ops = append(r.ops, "set:"+pkg+"."+section+"."+option)
 	r.sets[pkg+"."+section+"."+option] = value

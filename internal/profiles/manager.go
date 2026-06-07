@@ -68,11 +68,16 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 		apSSID, apKey = profile.MeshSSID, profile.MeshKey
 	}
 
+	radio, err := m.resolveRadio(ctx, profile)
+	if err != nil {
+		return err
+	}
+
 	wireless := false
 
 	if profile.MeshSSID != "" {
 		mesh := map[string]string{
-			"device":  m.cfg.Radio,
+			"device":  radio,
 			"mode":    "mesh",
 			"mesh_id": profile.MeshSSID,
 			"network": "lan",
@@ -92,7 +97,7 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 
 	if apSSID != "" {
 		ap := map[string]string{
-			"device":  m.cfg.Radio,
+			"device":  radio,
 			"mode":    "ap",
 			"ssid":    apSSID,
 			"network": "lan",
@@ -112,7 +117,7 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 	// A fresh OpenWrt radio ships disabled; enable it or neither interface
 	// ever starts.
 	if wireless {
-		if err := m.uciClient.Set(ctx, "wireless", m.cfg.Radio, "disabled", "0"); err != nil {
+		if err := m.uciClient.Set(ctx, "wireless", radio, "disabled", "0"); err != nil {
 			return fmt.Errorf("enable radio: %w", err)
 		}
 	}
@@ -138,6 +143,38 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 	}
 
 	return nil
+}
+
+// resolveRadio picks the wifi-device for a profile. An explicit Radio wins;
+// otherwise a Band ("2g"/"5g"/"6g") is resolved to the matching wifi-device by
+// reading the live wireless config; otherwise the daemon default is used. A
+// Band with no matching radio is an error rather than a silent wrong-band
+// fallback, so the operator learns the device lacks that band.
+func (m *Manager) resolveRadio(ctx context.Context, profile models.Profile) (string, error) {
+	if profile.Radio != "" {
+		return profile.Radio, nil
+	}
+	if profile.Band != "" {
+		sections, err := m.uciClient.Sections(ctx, "wireless")
+		if err != nil {
+			return "", fmt.Errorf("list wireless devices: %w", err)
+		}
+		// Pick the lowest-numbered matching radio for determinism (radio0 <
+		// radio1 sorts correctly as strings for these names).
+		match := ""
+		for name, opts := range sections {
+			if opts[".type"] == "wifi-device" && opts["band"] == profile.Band {
+				if match == "" || name < match {
+					match = name
+				}
+			}
+		}
+		if match == "" {
+			return "", fmt.Errorf("no radio for band %q on this device", profile.Band)
+		}
+		return match, nil
+	}
+	return m.cfg.Radio, nil
 }
 
 func (m *Manager) ApplyProfileForHome(ctx context.Context, homeID string) error {
