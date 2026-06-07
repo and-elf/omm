@@ -79,12 +79,14 @@ esac
 EOF
 chmod +x /usr/libexec/rpcd/hostapd.ap0
 
-# Seed the uci config meshd's profile apply writes to: a named 'mesh' wifi-iface
-# (it sets wireless.mesh.ssid/key) and a system section (it sets the hostname).
-# The real rpcd 'uci' object operates on these.
+# Seed the uci config meshd's profile apply writes to: a radio0 wifi-device (it
+# authors omm_mesh/omm_ap wifi-iface sections on it and enables the radio) and a
+# system section (it sets the hostname). The real rpcd 'uci' object operates on
+# these.
 cat > /etc/config/wireless <<'EOF'
-config wifi-iface 'mesh'
-	option ssid 'old-mesh'
+config wifi-device 'radio0'
+	option type 'mac80211'
+	option disabled '1'
 EOF
 cat > /etc/config/system <<'EOF'
 config system

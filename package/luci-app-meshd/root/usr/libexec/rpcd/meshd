@@ -41,6 +41,13 @@ _strip_headers() { awk 'body{print;next} /^\r?$/{body=1}'; }
 # the full response and exits cleanly. Content-Length is byte-counted (wc -c)
 # so a multi-byte UTF-8 body (e.g. a home name) is framed correctly; without it
 # Go's net/http treats the request as having no body.
+#
+# Once the request is written, nc's stdin hits EOF and busybox nc half-closes
+# the socket. Go's http server reads that as the client going away and cancels
+# the request context — so meshd must not tie its downstream `ubus` work to the
+# request context (it doesn't; see internal/ubus.Call), or slow handlers would
+# die with "context canceled". meshd can still write the response over the
+# half-open socket, which nc reads here.
 http_req() {
 	{
 		printf '%s %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n' "$1" "$2" "$MESHD_HOST"
