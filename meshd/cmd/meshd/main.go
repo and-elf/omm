@@ -15,6 +15,7 @@ import (
 	"github.com/and-elf/omm/internal/api"
 	"github.com/and-elf/omm/internal/client"
 	"github.com/and-elf/omm/internal/config"
+	"github.com/and-elf/omm/internal/deviceled"
 	"github.com/and-elf/omm/internal/discovery"
 	"github.com/and-elf/omm/internal/enrollment"
 	"github.com/and-elf/omm/internal/identity"
@@ -263,6 +264,13 @@ func main() {
 		log.Printf("setup AP up: ssid=%s", setupAP.SSID(id.NodeID()))
 	}()
 
+	// Drive the status LED from the onboarding state so an installer can read it
+	// off the device: blink while unclaimed, heartbeat while joining, solid once
+	// active. No-op on hardware lacking the configured LED.
+	if cfg.LEDEnabled {
+		go ledReactorLoop(ctx, store, deviceled.New(""), cfg.LEDName, 2*time.Second)
+	}
+
 	<-ctx.Done()
 	log.Println("shutting down meshd")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -270,6 +278,34 @@ func main() {
 	for _, srv := range servers {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("shutdown %s failed: %v", srv.Addr, err)
+		}
+	}
+}
+
+// ledReactorLoop polls the onboarding state and drives the status LED to match,
+// re-asserting on a ticker so the LED self-heals if something else touches it.
+// Reads are cheap bolt lookups; the reactor only writes sysfs when the derived
+// state changes.
+func ledReactorLoop(ctx context.Context, store storage.Store, led deviceled.LEDController, name string, interval time.Duration) {
+	r := deviceled.NewReactor(led, name)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		complete, err := store.GetSetupComplete(ctx)
+		if err != nil {
+			log.Printf("led: read setup state failed: %v", err)
+		}
+		active, err := store.GetActiveHome(ctx)
+		if err != nil {
+			log.Printf("led: read active home failed: %v", err)
+		}
+		if _, err := r.Update(deviceled.StateFor(complete, active)); err != nil {
+			log.Printf("led: update failed (non-fatal): %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }
