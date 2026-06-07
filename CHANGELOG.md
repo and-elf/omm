@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-07
+
 ### Added
 - **Backhaul connection type in the topology graph.** Each node now reports how
   it reaches the mesh — over a wired ethernet uplink or the wireless mesh —
