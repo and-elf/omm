@@ -6,7 +6,9 @@ import { api, ApiClient } from '@/api/client'
 import AsyncSection from '@/components/AsyncSection.vue'
 import { useAsync } from '@/composables/useAsync'
 import type { Home } from '@/types'
+import { BAND_OPTIONS } from '@/types'
 import { formatLastSeen } from '@/utils/format'
+import { randomId } from '@/utils/uuid'
 
 const props = withDefaults(defineProps<{ client?: ApiClient }>(), {
   client: () => api,
@@ -15,7 +17,7 @@ const props = withDefaults(defineProps<{ client?: ApiClient }>(), {
 const { data: homes, error, loading, run } = useAsync(() => props.client.listHomes())
 const activeHome = ref('')
 
-const form = reactive({ name: '', controller: '' })
+const form = reactive({ name: '', ssid: '', password: '', band: '', controller: '' })
 const submitting = ref(false)
 const formError = ref<string | null>(null)
 
@@ -33,12 +35,33 @@ async function createHome() {
     formError.value = 'Name is required'
     return
   }
+  if (!form.ssid.trim()) {
+    formError.value = 'Wi-Fi name (SSID) is required'
+    return
+  }
+  // WPA2/SAE passphrases must be 8–63 chars; an empty password means an open
+  // network. Reject the in-between case rather than letting hostapd refuse the
+  // interface silently on the device.
+  if (form.password && form.password.length < 8) {
+    formError.value = 'Wi-Fi password must be at least 8 characters (or empty for an open network)'
+    return
+  }
   submitting.value = true
   formError.value = null
   try {
-    const id = crypto.randomUUID()
+    const id = randomId()
     await props.client.createHome({ id, name: form.name.trim(), controller: form.controller.trim() })
+    // Seed the profile so the home comes up with wireless immediately: the
+    // mesh SSID/key also back the client AP (see ApplyProfile's fallback).
+    await props.client.saveProfile(id, {
+      mesh_ssid: form.ssid.trim(),
+      mesh_key: form.password,
+      band: form.band,
+    })
     form.name = ''
+    form.ssid = ''
+    form.password = ''
+    form.band = ''
     form.controller = ''
     await refresh()
   } catch (err) {
@@ -84,6 +107,18 @@ onMounted(refresh)
       <h3 class="form__title">Create a new Home</h3>
       <div class="form__row">
         <input v-model="form.name" class="input" placeholder="Home name (e.g. Cottage)" />
+        <input v-model="form.ssid" class="input" placeholder="Wi-Fi name (SSID)" />
+        <input
+          v-model="form.password"
+          class="input"
+          type="password"
+          placeholder="Wi-Fi password (8+ chars, blank = open)"
+        />
+        <select v-model="form.band" class="input" data-test="band-select" aria-label="Band">
+          <option v-for="b in BAND_OPTIONS" :key="b.value" :value="b.value">
+            {{ b.value ? `Band: ${b.label}` : 'Band: Default' }}
+          </option>
+        </select>
         <input v-model="form.controller" class="input" placeholder="Controller id (optional)" />
         <button class="btn btn--primary" type="submit" :disabled="submitting">Create</button>
       </div>
