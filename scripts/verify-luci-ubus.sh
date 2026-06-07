@@ -29,6 +29,10 @@ set -e
 mkdir -p /var/lock /var/run/ubus /usr/libexec/rpcd /usr/share/rpcd/acl.d /etc/meshd /www
 opkg update >/dev/null 2>&1
 opkg install uhttpd uhttpd-mod-ubus curl >/dev/null 2>&1 || { echo "FAIL: package install (no feed?)"; exit 1; }
+# The rpcd plugin talks to meshd via nc; the curl above is only for this
+# harness's /ubus client calls. Ensure nc exists (busybox usually provides it;
+# fall back to the netcat package) so the plugin path is exercised for real.
+command -v nc >/dev/null 2>&1 || opkg install netcat >/dev/null 2>&1 || { echo "FAIL: no nc for plugin"; exit 1; }
 
 cp /host/meshd /usr/bin/meshd && chmod +x /usr/bin/meshd
 cp /host/rpcd-meshd /usr/libexec/rpcd/meshd && chmod +x /usr/libexec/rpcd/meshd

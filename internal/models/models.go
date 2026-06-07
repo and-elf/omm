@@ -18,11 +18,24 @@ type Node struct {
 }
 
 type Profile struct {
-	HomeID   string   `json:"home_id"`
-	NodeName string   `json:"node_name"`
-	MeshSSID string   `json:"mesh_ssid"`
-	MeshKey  string   `json:"mesh_key"`
-	VLANs    []string `json:"vlans"`
+	HomeID   string `json:"home_id"`
+	NodeName string `json:"node_name"`
+	MeshSSID string `json:"mesh_ssid"`
+	MeshKey  string `json:"mesh_key"`
+	// APSSID/APKey configure the client-facing access point a claimed home
+	// broadcasts (so phones/laptops can join and get an address). When empty
+	// they fall back to MeshSSID/MeshKey, so a home configured with only mesh
+	// settings still comes up with a usable AP.
+	APSSID string `json:"ap_ssid"`
+	APKey  string `json:"ap_key"`
+	// Band selects the radio by frequency ("2g", "5g" or "6g"); meshd resolves
+	// it to the matching OpenWrt wifi-device. This is the friendly knob, since
+	// radio names are device-specific. Radio is an advanced override naming the
+	// wifi-device directly (e.g. "radio0"). Precedence: Radio, then Band, then
+	// the daemon default.
+	Band  string   `json:"band"`
+	Radio string   `json:"radio"`
+	VLANs []string `json:"vlans"`
 }
 
 // EnrollmentStatus tracks a node through the enrollment flow.

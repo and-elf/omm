@@ -10,9 +10,14 @@ import (
 )
 
 // fakeUCI records the ordered sequence of UCI operations so tests can assert
-// that a profile is committed and then applied (reloaded).
+// that a profile is committed and then applied (reloaded), plus the sections it
+// authored (keyed by section name) and plain Set calls so tests can check the
+// wireless layout.
 type fakeUCI struct {
 	ops       []string
+	sections  map[string]map[string]string
+	sets      []string                     // "pkg.section.option=value" for plain Set calls
+	wireless  map[string]map[string]string // canned Sections("wireless") response
 	reloadErr error
 }
 
@@ -22,13 +27,25 @@ func (f *fakeUCI) Get(ctx context.Context, pkg, section, option string) (string,
 	return "", nil
 }
 
+func (f *fakeUCI) Sections(ctx context.Context, pkg string) (map[string]map[string]string, error) {
+	if pkg == "wireless" {
+		return f.wireless, nil
+	}
+	return nil, nil
+}
+
 func (f *fakeUCI) Set(ctx context.Context, pkg, section, option, value string) error {
 	f.ops = append(f.ops, "set:"+pkg)
+	f.sets = append(f.sets, pkg+"."+section+"."+option+"="+value)
 	return nil
 }
 
 func (f *fakeUCI) SetSection(ctx context.Context, pkg, section, sectionType string, values map[string]string) error {
 	f.ops = append(f.ops, "setsection:"+pkg)
+	if f.sections == nil {
+		f.sections = map[string]map[string]string{}
+	}
+	f.sections[section] = values
 	return nil
 }
 
@@ -51,7 +68,7 @@ func (f *fakeUCI) Close() error { return nil }
 
 func TestApplyProfileReloadsAfterCommit(t *testing.T) {
 	fake := &fakeUCI{}
-	m := NewManager(nil, fake)
+	m := NewManager(nil, fake, Config{})
 
 	profile := models.Profile{HomeID: "h1", NodeName: "garage", MeshSSID: "omm", MeshKey: "secret123"}
 	if err := m.ApplyProfile(context.Background(), profile); err != nil {
@@ -78,10 +95,157 @@ func TestApplyProfileReloadsAfterCommit(t *testing.T) {
 
 func TestApplyProfileReloadFailurePropagates(t *testing.T) {
 	fake := &fakeUCI{reloadErr: errors.New("netifd down")}
-	m := NewManager(nil, fake)
+	m := NewManager(nil, fake, Config{})
 
 	err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", MeshSSID: "omm"})
 	if err == nil {
 		t.Fatal("expected reload failure to propagate, got nil")
 	}
+}
+
+// A mesh-only profile must still bring up wireless: the 802.11s backhaul and a
+// client AP that reuses the mesh SSID/key, with the radio enabled. Without this
+// a claimed home has no active wifi at all (the original bug: ApplyProfile only
+// `uci set` an absent `mesh` section, so nothing was created).
+func TestApplyProfileAuthorsMeshAndAPAndEnablesRadio(t *testing.T) {
+	fake := &fakeUCI{}
+	m := NewManager(nil, fake, Config{Radio: "radio1"})
+
+	profile := models.Profile{HomeID: "h1", MeshSSID: "omm-mesh", MeshKey: "secret123"}
+	if err := m.ApplyProfile(context.Background(), profile); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+
+	mesh := fake.sections[meshSection]
+	if mesh == nil {
+		t.Fatalf("mesh section %q not authored; sections=%v", meshSection, fake.sections)
+	}
+	if mesh["mode"] != "mesh" || mesh["mesh_id"] != "omm-mesh" || mesh["encryption"] != "sae" ||
+		mesh["key"] != "secret123" || mesh["device"] != "radio1" || mesh["network"] != "lan" {
+		t.Fatalf("mesh section wrong: %v", mesh)
+	}
+
+	// AP falls back to the mesh SSID/key (psk2) when no explicit AP is given.
+	ap := fake.sections[apSection]
+	if ap == nil {
+		t.Fatalf("ap section %q not authored; sections=%v", apSection, fake.sections)
+	}
+	if ap["mode"] != "ap" || ap["ssid"] != "omm-mesh" || ap["encryption"] != "psk2" ||
+		ap["key"] != "secret123" || ap["device"] != "radio1" || ap["network"] != "lan" {
+		t.Fatalf("ap section wrong: %v", ap)
+	}
+
+	if !contains(fake.sets, "wireless.radio1.disabled=0") {
+		t.Fatalf("radio not enabled; sets=%v", fake.sets)
+	}
+}
+
+// A radio pinned on the profile overrides the daemon default for both ifaces
+// and the enable, so an operator can put a home on the 2.4 GHz device for range.
+func TestApplyProfilePinsRadioFromProfile(t *testing.T) {
+	fake := &fakeUCI{}
+	m := NewManager(nil, fake, Config{Radio: "radio0"})
+
+	profile := models.Profile{HomeID: "h1", MeshSSID: "omm", MeshKey: "secret123", Radio: "radio1"}
+	if err := m.ApplyProfile(context.Background(), profile); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+
+	if fake.sections[meshSection]["device"] != "radio1" || fake.sections[apSection]["device"] != "radio1" {
+		t.Fatalf("expected both ifaces on radio1; got mesh=%v ap=%v",
+			fake.sections[meshSection], fake.sections[apSection])
+	}
+	if !contains(fake.sets, "wireless.radio1.disabled=0") || contains(fake.sets, "wireless.radio0.disabled=0") {
+		t.Fatalf("expected radio1 enabled (not radio0); sets=%v", fake.sets)
+	}
+}
+
+// lyraRadios mirrors an Asus Lyra's layout: radio0/radio2 are 5 GHz, radio1 is
+// 2.4 GHz — i.e. radio0 is NOT 2.4 GHz, so band resolution can't assume names.
+func lyraRadios() map[string]map[string]string {
+	return map[string]map[string]string{
+		"radio0":         {".type": "wifi-device", ".name": "radio0", "band": "5g"},
+		"radio1":         {".type": "wifi-device", ".name": "radio1", "band": "2g"},
+		"radio2":         {".type": "wifi-device", ".name": "radio2", "band": "5g"},
+		"default_radio0": {".type": "wifi-iface", "device": "radio0"},
+	}
+}
+
+func TestApplyProfileResolvesBandToRadio(t *testing.T) {
+	fake := &fakeUCI{wireless: lyraRadios()}
+	m := NewManager(nil, fake, Config{Radio: "radio0"})
+
+	if err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", MeshSSID: "omm", Band: "2g"}); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+	if got := fake.sections[apSection]["device"]; got != "radio1" {
+		t.Fatalf("band 2g resolved to %q, want radio1", got)
+	}
+}
+
+func TestApplyProfileBandPicksLowestNumberedMatch(t *testing.T) {
+	fake := &fakeUCI{wireless: lyraRadios()}
+	m := NewManager(nil, fake, Config{})
+
+	if err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", MeshSSID: "omm", Band: "5g"}); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+	if got := fake.sections[meshSection]["device"]; got != "radio0" {
+		t.Fatalf("band 5g resolved to %q, want radio0 (lowest of radio0/radio2)", got)
+	}
+}
+
+func TestApplyProfileUnavailableBandErrors(t *testing.T) {
+	fake := &fakeUCI{wireless: lyraRadios()}
+	m := NewManager(nil, fake, Config{})
+
+	err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", MeshSSID: "omm", Band: "6g"})
+	if err == nil {
+		t.Fatal("expected an error for a band with no matching radio")
+	}
+}
+
+func TestApplyProfileRadioOverridesBand(t *testing.T) {
+	fake := &fakeUCI{wireless: lyraRadios()}
+	m := NewManager(nil, fake, Config{})
+
+	// Band would resolve to radio1, but an explicit Radio wins.
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm", Band: "2g", Radio: "radio2"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+	if got := fake.sections[apSection]["device"]; got != "radio2" {
+		t.Fatalf("explicit radio override = %q, want radio2", got)
+	}
+}
+
+// Explicit AP SSID/key override the mesh fallback.
+func TestApplyProfileExplicitAPOverridesMeshFallback(t *testing.T) {
+	fake := &fakeUCI{}
+	m := NewManager(nil, fake, Config{})
+
+	profile := models.Profile{
+		HomeID: "h1", MeshSSID: "backhaul", MeshKey: "meshkey12",
+		APSSID: "HomeWiFi", APKey: "guestpass",
+	}
+	if err := m.ApplyProfile(context.Background(), profile); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+
+	ap := fake.sections[apSection]
+	if ap["ssid"] != "HomeWiFi" || ap["key"] != "guestpass" {
+		t.Fatalf("explicit AP not honored: %v", ap)
+	}
+	if fake.sections[meshSection]["mesh_id"] != "backhaul" {
+		t.Fatalf("mesh id wrong: %v", fake.sections[meshSection])
+	}
+}
+
+func contains(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }

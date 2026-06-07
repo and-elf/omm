@@ -46,18 +46,22 @@ func TestActiveHomeSetAndGet(t *testing.T) {
 // spyProfileManager records ApplyProfileForHome calls so tests can assert that
 // switching the active Home pushes that Home's profile to UCI.
 type spyProfileManager struct {
-	appliedHome string
-	applyCalls  int
-	applyErr    error
+	appliedHome   string
+	applyCalls    int
+	applyErr      error
+	appliedCtxErr error // ctx.Err() observed inside the apply
 }
 
 func (s *spyProfileManager) ApplyProfile(ctx context.Context, profile models.Profile) error {
-	return nil
+	s.applyCalls++
+	s.appliedCtxErr = ctx.Err()
+	return s.applyErr
 }
 
 func (s *spyProfileManager) ApplyProfileForHome(ctx context.Context, homeID string) error {
 	s.applyCalls++
 	s.appliedHome = homeID
+	s.appliedCtxErr = ctx.Err()
 	return s.applyErr
 }
 
@@ -93,6 +97,36 @@ func TestActiveHomeApplyFailureReturns500(t *testing.T) {
 	rw := putJSON(t, router, "/active-home", `{"home_id":"home-1"}`)
 	if rw.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 when apply fails, got %d (%s)", rw.Code, rw.Body)
+	}
+}
+
+// Applying a profile mutates UCI over several seconds; it must not be cancelled
+// when the client connection drops (the LuCI rpcd/nc transport closing the
+// socket once it has the request body cancels r.Context() and was killing the
+// in-flight `ubus` call with "context canceled"). The apply must run with a
+// context detached from the request's cancellation.
+func TestActiveHomeApplyDetachedFromRequestCancellation(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	store := storage.NewStore(db)
+	if err := store.CreateHome(context.Background(), models.Home{ID: "home-1", Name: "Home"}); err != nil {
+		t.Fatalf("create home: %v", err)
+	}
+	spy := &spyProfileManager{}
+	router := NewRouter(store, spy)
+
+	// A request whose context is already cancelled, as if the client hung up.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPut, "/active-home", strings.NewReader(`{"home_id":"home-1"}`)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(httptest.NewRecorder(), req)
+
+	if spy.applyCalls != 1 {
+		t.Fatalf("expected the apply to run once, got %d", spy.applyCalls)
+	}
+	if spy.appliedCtxErr != nil {
+		t.Fatalf("apply ran with a cancelled context (%v); it must be detached from the request", spy.appliedCtxErr)
 	}
 }
 

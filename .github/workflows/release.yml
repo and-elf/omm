@@ -297,6 +297,16 @@ jobs:
           name: apk-tools
           path: apk-tools
       - run: chmod +x apk-tools/apk
+      - name: Package luci-app-meshd (.apk)
+        # apk counterpart of the luci .ipk above; noarch, built once. Done
+        # after apk-tools is fetched and before the feed index so the index
+        # covers it too.
+        env:
+          APK: ${{ github.workspace }}/apk-tools/apk
+          APK_SIGN_KEY: ${{ secrets.APK_SIGN_KEY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}" ./scripts/package-luci-apk.sh
+          cp build/luci-ipk/*.apk dist/
       - name: Build signed apk feed index
         # apk counterpart of the opkg index: a (signed) packages.adb over the
         # per-arch .apk files, so the release also works as an apk feed.

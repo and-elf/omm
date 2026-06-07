@@ -56,6 +56,8 @@ go test -tags e2e -run TestLuCIWorkflowE2E -timeout 25m -v ./internal/e2e/...
 
 It needs a container runtime testcontainers can reach (Docker on CI, podman
 locally) with network access to pull the OpenWrt rootfs image and install
-`uhttpd`/`rpcd`/`curl` from the feed. The narrower
+`uhttpd`/`rpcd` from the feed (plus `curl`, used only by the harness's own
+readiness/`/ubus` probes — the rpcd plugin itself talks to meshd via busybox
+`nc`, so the shipped package has no curl dependency). The narrower
 [`scripts/verify-luci-ubus.sh`](../scripts/verify-luci-ubus.sh) remains a quick
 host-side check of the same `/ubus` path (status + ACL only).

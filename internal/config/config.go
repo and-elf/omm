@@ -74,8 +74,13 @@ func Load() Config {
 		MeshAddr:     envOr("MESHD_MESH_ADDR", "0.0.0.0:8081"),
 		DatabasePath: envOr("MESHD_DATABASE_PATH", "./meshd.bolt"),
 		UDPListen:    envOr("MESHD_UDP_LISTEN", ":45678"),
-		UbusSocket:   envOr("MESHD_UBUS_SOCKET", "/var/run/ubus.sock"),
-		UbusBinary:   envOr("MESHD_UBUS_BINARY", "ubus"),
+		// Empty by default so the ubus/uci CLI uses its own compiled-in
+		// socket path, which is correct for whatever OpenWrt release is
+		// running. Hardcoding /var/run/ubus.sock broke on modern OpenWrt,
+		// where the socket moved to /var/run/ubus/ubus.sock. Override with
+		// MESHD_UBUS_SOCKET only for a non-standard layout.
+		UbusSocket: os.Getenv("MESHD_UBUS_SOCKET"),
+		UbusBinary: envOr("MESHD_UBUS_BINARY", "ubus"),
 
 		HomeID:       envOr("MESHD_HOME_ID", "default-home"),
 		HomeName:     envOr("MESHD_HOME_NAME", "Home"),

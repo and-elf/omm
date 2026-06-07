@@ -93,7 +93,7 @@ func main() {
 		}
 	}
 
-	profileManager := profiles.NewManager(store, uciClient)
+	profileManager := profiles.NewManager(store, uciClient, profiles.Config{Radio: cfg.SetupAPRadio})
 	enrollSvc := enrollment.NewService(store, enrollment.Options{HomeID: cfg.HomeID, AutoAdopt: cfg.AutoAdopt, CA: homeCA})
 
 	// First-boot setup AP: while the device is unclaimed (setup not complete) it

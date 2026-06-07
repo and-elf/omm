@@ -3,6 +3,7 @@ package uci
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -19,6 +20,8 @@ type fakeUbusClient struct {
 	calls      []ubusCall
 	response   interface{}
 	err        error
+	errOn      string // "object.method" that should return errOnErr
+	errOnErr   error
 }
 
 func (f *fakeUbusClient) Call(ctx context.Context, object, method string, params interface{}, result interface{}) error {
@@ -26,6 +29,9 @@ func (f *fakeUbusClient) Call(ctx context.Context, object, method string, params
 	f.lastMethod = method
 	f.lastParams = params
 	f.calls = append(f.calls, ubusCall{object: object, method: method})
+	if f.errOn != "" && f.errOn == object+"."+method {
+		return f.errOnErr
+	}
 	if f.err != nil {
 		return f.err
 	}
@@ -156,6 +162,52 @@ func TestDelete(t *testing.T) {
 	}
 }
 
+func TestSections(t *testing.T) {
+	fake := &fakeUbusClient{response: map[string]interface{}{
+		"values": map[string]interface{}{
+			"radio0": map[string]interface{}{".type": "wifi-device", "band": "5g"},
+			// A list-valued option must be skipped, not error the whole call.
+			"@wifi-iface[0]": map[string]interface{}{".type": "wifi-iface", "list": []string{"a", "b"}},
+		},
+	}}
+	client := &client{ubusClient: fake}
+
+	got, err := client.Sections(context.Background(), "wireless")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got["radio0"][".type"] != "wifi-device" || got["radio0"]["band"] != "5g" {
+		t.Fatalf("radio0 options not parsed: %#v", got["radio0"])
+	}
+	if _, present := got["@wifi-iface[0]"]["list"]; present {
+		t.Fatalf("list-valued option should be skipped, got %#v", got["@wifi-iface[0]"])
+	}
+	if fake.lastObject != "uci" || fake.lastMethod != "get" {
+		t.Fatalf("expected uci.get, got %s.%s", fake.lastObject, fake.lastMethod)
+	}
+}
+
+// The dhcp service event is best-effort: environments without procd (e.g. a
+// minimal ubusd+rpcd test container) lack the `service` object, and that must
+// not fail the reload — the config is already committed and netifd reloaded.
+func TestReloadDhcpEventIsBestEffort(t *testing.T) {
+	fake := &fakeUbusClient{errOn: "service.event", errOnErr: errors.New("Object not found")}
+	client := &client{ubusClient: fake}
+
+	if err := client.Reload(context.Background()); err != nil {
+		t.Fatalf("reload must succeed despite a failing dhcp service event, got: %v", err)
+	}
+	// The network/wireless reloads still ran, and the event was attempted.
+	want := []ubusCall{
+		{object: "network", method: "reload"},
+		{object: "network.wireless", method: "reconf"},
+		{object: "service", method: "event"},
+	}
+	if !reflect.DeepEqual(fake.calls, want) {
+		t.Fatalf("unexpected call sequence: %#v", fake.calls)
+	}
+}
+
 func TestReload(t *testing.T) {
 	fake := &fakeUbusClient{}
 	client := &client{ubusClient: fake}
@@ -167,8 +219,20 @@ func TestReload(t *testing.T) {
 	want := []ubusCall{
 		{object: "network", method: "reload"},
 		{object: "network.wireless", method: "reconf"},
+		{object: "service", method: "event"},
 	}
 	if !reflect.DeepEqual(fake.calls, want) {
-		t.Fatalf("expected network reload then wireless reconf, got %#v", fake.calls)
+		t.Fatalf("expected network reload, wireless reconf, then dhcp service event, got %#v", fake.calls)
+	}
+
+	// The service event must be a procd config.change for the dhcp package, so
+	// dnsmasq/odhcpd re-read config and serve the freshly-committed pool.
+	// Without it, a client associates to the setup AP but never gets a lease.
+	want_params := map[string]interface{}{
+		"type": "config.change",
+		"data": map[string]string{"package": "dhcp"},
+	}
+	if !reflect.DeepEqual(fake.lastParams, want_params) {
+		t.Fatalf("dhcp reload event params = %#v, want %#v", fake.lastParams, want_params)
 	}
 }

@@ -39,19 +39,85 @@ describe('HomesView', () => {
     expect(wrapper.text().toLowerCase()).toContain('no homes')
   })
 
-  it('creates a home from the form', async () => {
+  it('creates a home and seeds its wireless profile', async () => {
+    const client = clientReturning([])
+    const createSpy = vi.spyOn(client, 'createHome').mockResolvedValue({} as never)
+    const saveSpy = vi.spyOn(client, 'saveProfile').mockResolvedValue({} as never)
+
+    const wrapper = mount(HomesView, { props: { client }, global: { stubs } })
+    await flushPromises()
+
+    const inputs = wrapper.findAll('input')
+    await inputs[0].setValue('Cottage') // name
+    await inputs[1].setValue('CottageWiFi') // ssid
+    await inputs[2].setValue('hunter2pass') // password
+    await wrapper.find('[data-test="band-select"]').setValue('2g')
+    await wrapper.find('[data-test="create-home"]').trigger('submit')
+    await flushPromises()
+
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ name: 'Cottage' }))
+    expect(saveSpy).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ mesh_ssid: 'CottageWiFi', mesh_key: 'hunter2pass', band: '2g' }),
+    )
+  })
+
+  it('requires an SSID before creating a home', async () => {
     const client = clientReturning([])
     const createSpy = vi.spyOn(client, 'createHome').mockResolvedValue({} as never)
 
     const wrapper = mount(HomesView, { props: { client }, global: { stubs } })
     await flushPromises()
 
-    await wrapper.find('input').setValue('Cottage')
+    await wrapper.findAll('input')[0].setValue('Cottage') // name only, no ssid
     await wrapper.find('[data-test="create-home"]').trigger('submit')
     await flushPromises()
 
-    expect(createSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'Cottage' }),
-    )
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(wrapper.find('[role="alert"]').text().toLowerCase()).toContain('ssid')
+  })
+
+  it('deletes a home after confirmation', async () => {
+    const client = clientReturning([
+      { id: 'h1', name: 'Main House', controller: 'gw01', certificate: null, last_seen: 1 },
+    ])
+    const deleteSpy = vi.spyOn(client, 'deleteHome').mockResolvedValue()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const wrapper = mount(HomesView, { props: { client }, global: { stubs } })
+    await flushPromises()
+
+    await wrapper.find('[data-test="delete-home"]').trigger('click')
+    await flushPromises()
+
+    expect(deleteSpy).toHaveBeenCalledWith('h1')
+  })
+
+  it('does not delete when confirmation is declined', async () => {
+    const client = clientReturning([
+      { id: 'h1', name: 'Main House', controller: 'gw01', certificate: null, last_seen: 1 },
+    ])
+    const deleteSpy = vi.spyOn(client, 'deleteHome').mockResolvedValue()
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    const wrapper = mount(HomesView, { props: { client }, global: { stubs } })
+    await flushPromises()
+
+    await wrapper.find('[data-test="delete-home"]').trigger('click')
+    await flushPromises()
+
+    expect(deleteSpy).not.toHaveBeenCalled()
+  })
+
+  it('disables delete for the active home', async () => {
+    const client = clientReturning([
+      { id: 'h1', name: 'Main House', controller: 'gw01', certificate: null, last_seen: 1 },
+    ])
+    vi.spyOn(client, 'getActiveHome').mockResolvedValue('h1')
+
+    const wrapper = mount(HomesView, { props: { client }, global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="delete-home"]').attributes('disabled')).toBeDefined()
   })
 })

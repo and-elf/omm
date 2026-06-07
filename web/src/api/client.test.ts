@@ -67,6 +67,24 @@ describe('ApiClient', () => {
     )
   })
 
+  it('deletes a home with a DELETE and tolerates a 204 (no body)', async () => {
+    const fetchFn = mockFetch({ status: 204 })
+    const client = new ApiClient('', fetchFn)
+
+    await expect(client.deleteHome('home 1')).resolves.toBeUndefined()
+    expect(fetchFn).toHaveBeenCalledWith(
+      '/homes/home%201',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('surfaces a 409 when deleting the active home', async () => {
+    const fetchFn = mockFetch({ ok: false, status: 409, json: { error: 'cannot delete the active Home' } })
+    const client = new ApiClient('', fetchFn)
+
+    await expect(client.deleteHome('h1')).rejects.toMatchObject({ status: 409 })
+  })
+
   it('lists pending enrollments and unwraps the array', async () => {
     const enrollments = [{ id: 'e1', node_id: 'n1', serial: 'SN1', status: 'pending_approval' }]
     const client = new ApiClient('', mockFetch({ json: { enrollments } }))

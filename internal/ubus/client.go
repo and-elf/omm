@@ -6,7 +6,13 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// execTimeout bounds a single ubus invocation. ubus calls here (uci ops,
+// netifd reloads, hostapd reads) all return quickly; this is a backstop, not a
+// normal limit.
+const execTimeout = 30 * time.Second
 
 type Client interface {
 	Call(ctx context.Context, object, method string, params interface{}, result interface{}) error
@@ -51,7 +57,17 @@ func (c *client) Call(ctx context.Context, object, method string, params interfa
 	}
 	args = append(args, "call", object, method, string(payload))
 
-	cmd := exec.CommandContext(ctx, c.binaryPath, args...)
+	// Detach the subprocess from the caller's cancellation. The rpcd plugin
+	// reaches meshd over a busybox-nc connection that half-closes once the
+	// request is written; Go then cancels the HTTP request context. Tying the
+	// `ubus` exec to that context would kill in-flight work (topology reads,
+	// profile apply) with "context canceled" the instant the client's write
+	// side closes — even though meshd can still send its response. A short
+	// timeout keeps a genuinely stuck call from hanging forever.
+	execCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), execTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(execCtx, c.binaryPath, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ubus call %s.%s: %w: %s", object, method, err, strings.TrimSpace(string(output)))

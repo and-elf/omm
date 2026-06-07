@@ -38,8 +38,10 @@ func runPlugin(t *testing.T, base, stdin string, args ...string) string {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
 	}
-	if _, err := exec.LookPath("curl"); err != nil {
-		t.Skip("curl not available")
+	// The plugin talks to meshd via busybox nc (no curl dependency), so the
+	// test needs an nc on PATH to exercise the real request/response path.
+	if _, err := exec.LookPath("nc"); err != nil {
+		t.Skip("nc not available")
 	}
 	cmd := exec.Command("sh", append([]string{pluginPath(t)}, args...)...)
 	cmd.Env = append(os.Environ(), "MESHD_URL="+base)

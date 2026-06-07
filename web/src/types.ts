@@ -16,11 +16,29 @@ export interface Node {
   last_seen: number
 }
 
+// Selectable Wi-Fi bands. The empty value means "let the daemon pick its
+// default radio". Values match OpenWrt's wifi-device `band` option.
+export const BAND_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: '', label: 'Default' },
+  { value: '2g', label: '2.4 GHz' },
+  { value: '5g', label: '5 GHz' },
+  { value: '6g', label: '6 GHz' },
+]
+
 export interface Profile {
   home_id: string
   node_name: string
   mesh_ssid: string
   mesh_key: string
+  // Optional client-AP overrides. When omitted, the controller broadcasts a
+  // client AP using mesh_ssid/mesh_key.
+  ap_ssid?: string
+  ap_key?: string
+  // Band ("2g" | "5g" | "6g") selects the radio by frequency; meshd resolves it
+  // to the matching wifi-device. radio is an advanced override naming the
+  // wifi-device directly. Precedence: radio, then band, then daemon default.
+  band?: string
+  radio?: string
   vlans: string[] | null
 }
 
