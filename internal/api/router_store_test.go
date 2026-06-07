@@ -130,3 +130,36 @@ func TestCreateAndGetProfile(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", rw.Code)
 	}
 }
+
+// A Home with no profile yet must return an empty profile (200), not 404, so
+// the UI can show a blank, editable form. A 404 here is reserved for an unknown
+// Home.
+func TestGetProfileMissingReturnsEmpty(t *testing.T) {
+	router := setupRouter(t)
+
+	body := strings.NewReader(`{"id":"home-1","name":"Main Home"}`)
+	req := httptest.NewRequest(http.MethodPost, "/homes", body)
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	router.ServeHTTP(rw, req)
+	if rw.Code != http.StatusCreated {
+		t.Fatalf("create home: expected 201, got %d", rw.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/homes/home-1/profile", nil)
+	rw = httptest.NewRecorder()
+	router.ServeHTTP(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("missing profile: expected 200, got %d (%s)", rw.Code, rw.Body.String())
+	}
+	if !strings.Contains(rw.Body.String(), `"home_id":"home-1"`) {
+		t.Fatalf("expected empty profile carrying the home id, got %s", rw.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/homes/ghost/profile", nil)
+	rw = httptest.NewRecorder()
+	router.ServeHTTP(rw, req)
+	if rw.Code != http.StatusNotFound {
+		t.Fatalf("unknown home: expected 404, got %d", rw.Code)
+	}
+}

@@ -57,7 +57,9 @@ func (h *apiHandler) setActiveHome(w http.ResponseWriter, r *http.Request) {
 	// (there is nothing to apply) and still report the selection as successful,
 	// mirroring meshd's auto-select. Any other apply error is fatal.
 	if h.profileManager != nil {
-		if err := h.profileManager.ApplyProfileForHome(r.Context(), req.HomeID); err != nil {
+		applyCtx, cancel := applyContext(r)
+		defer cancel()
+		if err := h.profileManager.ApplyProfileForHome(applyCtx, req.HomeID); err != nil {
 			if !errors.Is(err, storage.ErrNotFound) {
 				respondError(w, http.StatusInternalServerError, fmt.Errorf("apply profile: %w", err))
 				return

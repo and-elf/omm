@@ -344,16 +344,43 @@ func (h *apiHandler) getHome(w http.ResponseWriter, r *http.Request) {
 
 func (h *apiHandler) getProfile(w http.ResponseWriter, r *http.Request) {
 	homeID := chi.URLParam(r, "homeID")
+
+	// 404 only when the Home itself is unknown.
+	if _, err := h.store.GetHome(r.Context(), homeID); err != nil {
+		if err == storage.ErrNotFound {
+			respondError(w, http.StatusNotFound, fmt.Errorf("home %q not found", homeID))
+			return
+		}
+		respondError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	profile, err := h.store.GetProfile(r.Context(), homeID)
 	if err != nil {
 		if err == storage.ErrNotFound {
-			respondError(w, http.StatusNotFound, err)
+			// A Home with no profile yet returns an empty, editable profile
+			// (200) rather than 404, so the UI presents a blank form. It also
+			// survives the LuCI ubus transport, which flattens any error body
+			// to HTTP 400 and so cannot be distinguished from a real failure.
+			writeJSON(w, http.StatusOK, profileResponse{Profile: models.Profile{HomeID: homeID}})
 			return
 		}
 		respondError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, profileResponse{Profile: profile})
+}
+
+// applyContext detaches profile application from the request's lifetime. The
+// profile is already persisted; pushing it to UCI is a multi-call, several-
+// second sequence (uci add/set/commit + netifd/wireless reload) that must not
+// be cancelled if the client connection drops. Notably the LuCI rpcd/nc
+// transport closes the socket as soon as the plugin has the request body,
+// cancelling r.Context() and killing the in-flight `ubus` exec ("context
+// canceled") before the radio is ever configured. Keep request values for
+// logging but drop cancellation, with a generous upper bound.
+func applyContext(r *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(r.Context()), 90*time.Second)
 }
 
 func (h *apiHandler) createProfile(w http.ResponseWriter, r *http.Request) {
@@ -382,7 +409,9 @@ func (h *apiHandler) createProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.profileManager != nil {
-		if err := h.profileManager.ApplyProfile(r.Context(), profile); err != nil {
+		applyCtx, cancel := applyContext(r)
+		defer cancel()
+		if err := h.profileManager.ApplyProfile(applyCtx, profile); err != nil {
 			respondError(w, http.StatusInternalServerError, fmt.Errorf("apply profile: %w", err))
 			return
 		}
