@@ -4,6 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 
 import { api, ApiClient } from '@/api/client'
 import { ApiError } from '@/api/client'
+import { BAND_OPTIONS } from '@/types'
 
 const props = withDefaults(defineProps<{ client?: ApiClient }>(), {
   client: () => api,
@@ -19,7 +20,16 @@ const saving = ref(false)
 const saveMessage = ref<string | null>(null)
 const saveError = ref<string | null>(null)
 
-const profile = reactive({ node_name: '', mesh_ssid: '', mesh_key: '', vlans: '' })
+const profile = reactive({
+  node_name: '',
+  mesh_ssid: '',
+  mesh_key: '',
+  ap_ssid: '',
+  ap_key: '',
+  band: '',
+  radio: '',
+  vlans: '',
+})
 
 async function load() {
   loading.value = true
@@ -32,6 +42,10 @@ async function load() {
       profile.node_name = p.node_name ?? ''
       profile.mesh_ssid = p.mesh_ssid ?? ''
       profile.mesh_key = p.mesh_key ?? ''
+      profile.ap_ssid = p.ap_ssid ?? ''
+      profile.ap_key = p.ap_key ?? ''
+      profile.band = p.band ?? ''
+      profile.radio = p.radio ?? ''
       profile.vlans = (p.vlans ?? []).join(', ')
     } catch (err) {
       // A home may not have a profile yet; start with a blank form.
@@ -55,6 +69,10 @@ async function save() {
       node_name: profile.node_name.trim(),
       mesh_ssid: profile.mesh_ssid.trim(),
       mesh_key: profile.mesh_key,
+      ap_ssid: profile.ap_ssid.trim(),
+      ap_key: profile.ap_key,
+      band: profile.band,
+      radio: profile.radio.trim(),
       vlans: profile.vlans
         .split(',')
         .map((v) => v.trim())
@@ -96,6 +114,20 @@ onMounted(load)
       </label>
       <label class="field"><span>Mesh key</span>
         <input v-model="profile.mesh_key" class="input" type="password" placeholder="mesh passphrase" />
+      </label>
+      <label class="field"><span>Client AP SSID</span>
+        <input v-model="profile.ap_ssid" class="input" placeholder="defaults to the mesh SSID" />
+      </label>
+      <label class="field"><span>Client AP key</span>
+        <input v-model="profile.ap_key" class="input" type="password" placeholder="defaults to the mesh key" />
+      </label>
+      <label class="field"><span>Band</span>
+        <select v-model="profile.band" class="input" data-test="band-select">
+          <option v-for="b in BAND_OPTIONS" :key="b.value" :value="b.value">{{ b.label }}</option>
+        </select>
+      </label>
+      <label class="field"><span>Radio override</span>
+        <input v-model="profile.radio" class="input" placeholder="advanced: e.g. radio0 (overrides band)" />
       </label>
       <label class="field"><span>VLANs</span>
         <input v-model="profile.vlans" class="input" placeholder="comma-separated, e.g. 10, 20" />
