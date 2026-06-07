@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LED is a graceful no-op, so the same build runs unchanged across hardware. Set
   `MESHD_LED=0` (UCI `led_enabled '0'`) to leave the LED alone. New
   `internal/deviceled` package.
+- **Wired auto-onboard.** An unclaimed node that is on the wire (ethernet
+  backhaul) can now enroll into a discovered controller unattended, with no setup
+  wizard: when it is still unclaimed, its ethernet uplink is up, and a controller
+  other than its own Home has been discovered, it joins (the lowest discovered
+  `home_id`, chosen deterministically), applies the returned profile, marks setup
+  complete and tears down the first-boot setup AP. Opt-in via
+  `MESHD_AUTO_ONBOARD_WIRED` (UCI `auto_onboard_wired`, default off); requires
+  `MESHD_BACKHAUL_IFACE` to be set, runs only when no explicit `MESHD_JOIN`
+  controllers are configured, and completes unattended only when the controller
+  auto-adopts. New `internal/onboard` package.
 
 ## [0.2.0] - 2026-06-03
 

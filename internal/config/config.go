@@ -36,6 +36,14 @@ type Config struct {
 	Serial      string
 	Join        []string // controller URLs to enroll into on boot
 
+	// AutoOnboardWired lets an unclaimed node that is on the wire (ethernet
+	// backhaul) enroll into a discovered controller unattended, with no wizard.
+	// Opt-in (default false): a node on an untrusted LAN should not silently
+	// join any controller that happens to be announcing. Requires BackhaulIface
+	// to be set, and the controller to auto-adopt for the join to complete
+	// without an operator approving it.
+	AutoOnboardWired bool
+
 	// Topology collection.
 	BatmanIface   string   // batman-adv interface (e.g. bat0)
 	APInterfaces  []string // hostapd interfaces to read clients from
@@ -97,9 +105,10 @@ func Load() Config {
 		BSSID:        os.Getenv("MESHD_BSSID"),
 		MeshIface:    os.Getenv("MESHD_MESH_IFACE"),
 
-		IdentityDir: envOr("MESHD_IDENTITY_DIR", "./meshd-identity"),
-		Serial:      envOr("MESHD_SERIAL", hostnameOr("unknown")),
-		Join:        splitList(os.Getenv("MESHD_JOIN")),
+		IdentityDir:      envOr("MESHD_IDENTITY_DIR", "./meshd-identity"),
+		Serial:           envOr("MESHD_SERIAL", hostnameOr("unknown")),
+		Join:             splitList(os.Getenv("MESHD_JOIN")),
+		AutoOnboardWired: envBool("MESHD_AUTO_ONBOARD_WIRED"),
 
 		BatmanIface:   envOr("MESHD_BATMAN_IFACE", "bat0"),
 		APInterfaces:  splitList(os.Getenv("MESHD_AP_IFACES")),

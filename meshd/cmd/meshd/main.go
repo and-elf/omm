@@ -20,6 +20,7 @@ import (
 	"github.com/and-elf/omm/internal/enrollment"
 	"github.com/and-elf/omm/internal/identity"
 	"github.com/and-elf/omm/internal/models"
+	"github.com/and-elf/omm/internal/onboard"
 	"github.com/and-elf/omm/internal/profiles"
 	"github.com/and-elf/omm/internal/selection"
 	"github.com/and-elf/omm/internal/setupap"
@@ -127,17 +128,21 @@ func main() {
 		}
 	}()
 
+	// completeSetupLocal is the single teardown path run when the device becomes
+	// claimed — by the wizard (the setup-complete hook below) or by wired
+	// auto-onboard — so the first-boot setup AP (and any uplink station) comes
+	// down exactly once, however setup finishes.
+	completeSetupLocal := func(ctx context.Context) error {
+		return setupAP.Disable(ctx)
+	}
+
 	apiOpts := []api.Option{
 		api.WithEnrollment(enrollSvc),
 		api.WithSelf(id, cfg.Serial),
 		api.WithSelfHome(cfg.HomeID),
 		api.WithTopology(collector),
 		api.WithSignalSource(wifiClients),
-		api.WithSetupCompleteHook(func(ctx context.Context) error {
-			// Device is now claimed: take down the first-boot setup AP (and the
-			// uplink station, if one was provisioned during onboarding).
-			return setupAP.Disable(ctx)
-		}),
+		api.WithSetupCompleteHook(completeSetupLocal),
 		api.WithUplinkProvisioner(func(ctx context.Context, ssid, key string) error {
 			// Wireless-only onboarding: join the home network as a station so the
 			// node gains a route to its controller and can enroll.
@@ -227,6 +232,13 @@ func main() {
 	if len(cfg.Join) == 0 {
 		// No joins configured: select from the Homes already known.
 		go autoSelect()
+
+		// Wired auto-onboard: an unclaimed node on the wire enrolls into a
+		// discovered controller unattended. Only here (no explicit joins) so it
+		// never races operator-configured joins.
+		if cfg.AutoOnboardWired {
+			go autoOnboardWired(ctx, store, collector, discoCache, id, profileManager, cfg, completeSetupLocal, autoSelect)
+		}
 	} else {
 		// Joining devices: wait to record the joined Home(s) before selecting,
 		// so an external Home can win over the device's own (last-resort) Home.
@@ -408,6 +420,73 @@ func reportTopologyLoop(ctx context.Context, collector *topology.Collector, node
 		case <-ticker.C:
 		}
 	}
+}
+
+// autoOnboardWired runs the wired auto-onboard loop: an unclaimed node on the
+// wire enrolls into a discovered controller unattended. The decision policy
+// lives in the onboard package (tested there); this wires it to the daemon's
+// store, backhaul detection, discovery cache and join flow.
+func autoOnboardWired(ctx context.Context, store storage.Store, collector *topology.Collector, disco *discovery.Cache, id *identity.Identity, pm profiles.ProfileManager, cfg config.Config, completeSetup func(context.Context) error, afterJoin func()) {
+	backhaul := topology.SysfsBackhaul{Iface: cfg.BackhaulIface}
+	clients := &controllerClients{}
+
+	// join enrolls into the chosen controller and, on success, completes setup:
+	// it mirrors joinHome but additionally marks the device claimed and tears the
+	// setup AP down, since there is no wizard to do so.
+	join := func(ctx context.Context, controllerURL string) error {
+		result, err := client.JoinAndRecord(ctx, id, controllerURL, cfg.Serial, store, client.Options{})
+		if err != nil {
+			return err
+		}
+		// Record the authenticated mesh transport so topology reports go over
+		// mutual TLS with the issued leaf.
+		if len(result.Certificate) > 0 && len(result.CACertificate) > 0 {
+			if ac, aerr := client.AuthenticatedClient(id, result.Certificate, result.CACertificate, 10*time.Second); aerr == nil {
+				clients.set(controllerURL, ac)
+			}
+		}
+		if result.Profile != nil {
+			if perr := pm.ApplyProfile(ctx, *result.Profile); perr != nil {
+				log.Printf("auto-onboard: apply profile from %s failed (non-fatal): %v", controllerURL, perr)
+			}
+		}
+		// Mark claimed first (durable state), then best-effort tear down the
+		// setup AP — the same ordering the wizard's completeSetup uses.
+		if serr := store.SetSetupComplete(ctx, true); serr != nil {
+			return serr
+		}
+		if terr := completeSetup(ctx); terr != nil {
+			log.Printf("auto-onboard: setup AP teardown failed (non-fatal): %v", terr)
+		}
+		// Push local topology to the controller we just joined (the no-Join
+		// branch starts no topology loop otherwise).
+		go reportTopologyLoop(ctx, collector, id.NodeID(), []string{controllerURL}, clients, 15*time.Second)
+		if afterJoin != nil {
+			afterJoin()
+		}
+		return nil
+	}
+
+	onboard.Run(ctx, onboard.Deps{
+		Interval:      5 * time.Second,
+		SelfHomeID:    cfg.HomeID,
+		SetupComplete: store.GetSetupComplete,
+		ActiveHome:    store.GetActiveHome,
+		Backhaul:      backhaul.Backhaul,
+		Discover: func() []discovery.Announcement {
+			// Answer from the passively-maintained cache, dropping this device's
+			// own Home (Decide also filters it, defensively).
+			list := disco.List()
+			out := list[:0]
+			for _, a := range list {
+				if a.HomeID != cfg.HomeID {
+					out = append(out, a)
+				}
+			}
+			return out
+		},
+		Join: join,
+	})
 }
 
 // joinHome enrolls this device into another controller, retrying until it
