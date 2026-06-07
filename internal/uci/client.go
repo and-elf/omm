@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/and-elf/omm/internal/ubus"
 )
@@ -158,12 +159,19 @@ func (c *client) Commit(ctx context.Context, packageName string) error {
 // network interfaces, the radios are reconfigured, and a procd config.change
 // event makes the DHCP services re-read their config.
 //
-// The dhcp event is essential for the setup AP: netifd brings the interface up,
-// but the DHCP server (dnsmasq, plus odhcpd) only serves a freshly-committed
-// pool after it is told to reload — exactly what `/sbin/reload_config` emits on
-// a `uci commit`. Without it a client associates to the AP but never gets a
-// lease. The radios use bind-dynamic, so dnsmasq picks up the setup interface
-// even though netifd brings it up asynchronously after this returns.
+// The dhcp event is what lets the setup AP hand out leases: netifd brings the
+// interface up, but the DHCP server (dnsmasq, plus odhcpd) only serves a
+// freshly-committed pool after it is told to reload — exactly what
+// `/sbin/reload_config` emits on a `uci commit`. Without it a client associates
+// to the AP but never gets a lease. The radios use bind-dynamic, so dnsmasq
+// picks up the setup interface even though netifd brings it up asynchronously
+// after this returns.
+//
+// The dhcp event is best-effort: the `service` object is provided by procd, so
+// on a real device it is always present, but minimal environments (e.g. an
+// ubusd+rpcd test container without procd) lack it. A failure there must not
+// fail the whole reload — the config is already committed and netifd has been
+// reloaded — so the error is logged and swallowed.
 func (c *client) Reload(ctx context.Context) error {
 	if err := c.ubusClient.Call(ctx, "network", "reload", nil, nil); err != nil {
 		return fmt.Errorf("reload network: %w", err)
@@ -176,7 +184,7 @@ func (c *client) Reload(ctx context.Context) error {
 		"data": map[string]string{"package": "dhcp"},
 	}
 	if err := c.ubusClient.Call(ctx, "service", "event", dhcpEvent, nil); err != nil {
-		return fmt.Errorf("reload dhcp services: %w", err)
+		log.Printf("uci reload: dhcp service event failed (non-fatal): %v", err)
 	}
 	return nil
 }

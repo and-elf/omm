@@ -3,6 +3,7 @@ package uci
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -19,6 +20,8 @@ type fakeUbusClient struct {
 	calls      []ubusCall
 	response   interface{}
 	err        error
+	errOn      string // "object.method" that should return errOnErr
+	errOnErr   error
 }
 
 func (f *fakeUbusClient) Call(ctx context.Context, object, method string, params interface{}, result interface{}) error {
@@ -26,6 +29,9 @@ func (f *fakeUbusClient) Call(ctx context.Context, object, method string, params
 	f.lastMethod = method
 	f.lastParams = params
 	f.calls = append(f.calls, ubusCall{object: object, method: method})
+	if f.errOn != "" && f.errOn == object+"."+method {
+		return f.errOnErr
+	}
 	if f.err != nil {
 		return f.err
 	}
@@ -178,6 +184,27 @@ func TestSections(t *testing.T) {
 	}
 	if fake.lastObject != "uci" || fake.lastMethod != "get" {
 		t.Fatalf("expected uci.get, got %s.%s", fake.lastObject, fake.lastMethod)
+	}
+}
+
+// The dhcp service event is best-effort: environments without procd (e.g. a
+// minimal ubusd+rpcd test container) lack the `service` object, and that must
+// not fail the reload — the config is already committed and netifd reloaded.
+func TestReloadDhcpEventIsBestEffort(t *testing.T) {
+	fake := &fakeUbusClient{errOn: "service.event", errOnErr: errors.New("Object not found")}
+	client := &client{ubusClient: fake}
+
+	if err := client.Reload(context.Background()); err != nil {
+		t.Fatalf("reload must succeed despite a failing dhcp service event, got: %v", err)
+	}
+	// The network/wireless reloads still ran, and the event was attempted.
+	want := []ubusCall{
+		{object: "network", method: "reload"},
+		{object: "network.wireless", method: "reconf"},
+		{object: "service", method: "event"},
+	}
+	if !reflect.DeepEqual(fake.calls, want) {
+		t.Fatalf("unexpected call sequence: %#v", fake.calls)
 	}
 }
 
