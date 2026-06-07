@@ -22,10 +22,15 @@ type fakeClients struct {
 
 func (f fakeClients) Clients(context.Context) ([]Client, error) { return f.clients, f.err }
 
+type fakeBackhaul struct{ kind string }
+
+func (f fakeBackhaul) Backhaul(context.Context) string { return f.kind }
+
 func TestCollectAssemblesGraph(t *testing.T) {
 	c := NewCollector("self-1", "Gateway",
 		fakeMesh{neighbors: []Neighbor{{ID: "aa:bb", TQ: 240}, {ID: "cc:dd", TQ: 180}}},
 		fakeClients{clients: []Client{{MAC: "11:22", Signal: -55, Band: "5GHz"}}},
+		fakeBackhaul{kind: BackhaulEthernet},
 	)
 	g := c.Collect(context.Background())
 
@@ -34,6 +39,13 @@ func TestCollectAssemblesGraph(t *testing.T) {
 	}
 	if g.Nodes[0].Role != "self" || g.Nodes[0].Label != "Gateway" {
 		t.Fatalf("expected self node first, got %+v", g.Nodes[0])
+	}
+	// Backhaul is reported on the self node only.
+	if g.Nodes[0].Backhaul != BackhaulEthernet {
+		t.Fatalf("expected self backhaul %q, got %q", BackhaulEthernet, g.Nodes[0].Backhaul)
+	}
+	if g.Nodes[1].Backhaul != "" {
+		t.Fatalf("expected neighbor nodes to carry no backhaul, got %q", g.Nodes[1].Backhaul)
 	}
 	if len(g.Links) != 2 || g.Links[0].Source != "self-1" || g.Links[0].TQ != 240 {
 		t.Fatalf("unexpected links: %+v", g.Links)
@@ -44,7 +56,7 @@ func TestCollectAssemblesGraph(t *testing.T) {
 }
 
 func TestCollectToleratesSourceErrors(t *testing.T) {
-	c := NewCollector("self-1", "", fakeMesh{err: context.DeadlineExceeded}, fakeClients{err: context.DeadlineExceeded})
+	c := NewCollector("self-1", "", fakeMesh{err: context.DeadlineExceeded}, fakeClients{err: context.DeadlineExceeded}, nil)
 	g := c.Collect(context.Background())
 	if len(g.Nodes) != 1 || len(g.Links) != 0 || len(g.Clients) != 0 {
 		t.Fatalf("expected only self node on source errors, got %+v", g)

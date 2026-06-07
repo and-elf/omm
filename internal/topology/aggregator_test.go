@@ -58,6 +58,36 @@ func TestMergeUnionsReports(t *testing.T) {
 	}
 }
 
+func TestMergePreservesBackhaulOnDemotedNode(t *testing.T) {
+	clock := int64(1000)
+	agg := NewAggregator(time.Minute, func() int64 { return clock })
+
+	// A member node reports itself (self) carrying its backhaul type.
+	agg.Ingest("n1", Graph{
+		Nodes: []Node{{ID: "n1", Role: "self", Backhaul: BackhaulEthernet}},
+	})
+
+	g := agg.Merge(Graph{Nodes: []Node{{ID: "ctrl", Role: "self"}}})
+
+	var n1 *Node
+	for i := range g.Nodes {
+		if g.Nodes[i].ID == "n1" {
+			n1 = &g.Nodes[i]
+		}
+	}
+	if n1 == nil {
+		t.Fatalf("expected n1 in merged graph, got %+v", g.Nodes)
+	}
+	// The reporting node is demoted to "node" but keeps its backhaul type so the
+	// controller can show how each node reaches the mesh.
+	if n1.Role != "node" {
+		t.Fatalf("expected n1 demoted to node, got role %q", n1.Role)
+	}
+	if n1.Backhaul != BackhaulEthernet {
+		t.Fatalf("expected n1 to keep backhaul %q, got %q", BackhaulEthernet, n1.Backhaul)
+	}
+}
+
 func TestMergeKeepsStrongestLinkAndDropsStale(t *testing.T) {
 	clock := int64(1000)
 	agg := NewAggregator(30*time.Second, func() int64 { return clock })

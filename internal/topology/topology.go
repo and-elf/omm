@@ -11,6 +11,11 @@ type Node struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	Role  string `json:"role"` // "self" | "node"
+	// Backhaul is how this node reaches the rest of the mesh: "ethernet",
+	// "wireless" or "unknown". It is set only on the node reporting its own
+	// graph (its "self" node) and rides along when the aggregator demotes that
+	// node, so the controller can show each node's backhaul type.
+	Backhaul string `json:"backhaul,omitempty"`
 }
 
 // Link is a mesh link between two nodes with its batman-adv transmit quality
@@ -60,14 +65,15 @@ type Collector struct {
 	selfLabel string
 	mesh      MeshSource
 	clients   ClientSource
+	backhaul  BackhaulSource
 }
 
-// NewCollector builds a collector. mesh and/or clients may be nil.
-func NewCollector(selfID, selfLabel string, mesh MeshSource, clients ClientSource) *Collector {
+// NewCollector builds a collector. mesh, clients and/or backhaul may be nil.
+func NewCollector(selfID, selfLabel string, mesh MeshSource, clients ClientSource, backhaul BackhaulSource) *Collector {
 	if selfLabel == "" {
 		selfLabel = selfID
 	}
-	return &Collector{selfID: selfID, selfLabel: selfLabel, mesh: mesh, clients: clients}
+	return &Collector{selfID: selfID, selfLabel: selfLabel, mesh: mesh, clients: clients, backhaul: backhaul}
 }
 
 // Collect gathers the current topology. Source errors are tolerated so a
@@ -75,6 +81,10 @@ func NewCollector(selfID, selfLabel string, mesh MeshSource, clients ClientSourc
 func (c *Collector) Collect(ctx context.Context) Graph {
 	g := Graph{Nodes: []Node{{ID: c.selfID, Label: c.selfLabel, Role: "self"}}}
 	seen := map[string]bool{c.selfID: true}
+
+	if c.backhaul != nil {
+		g.Nodes[0].Backhaul = c.backhaul.Backhaul(ctx)
+	}
 
 	if c.mesh != nil {
 		if neighbors, err := c.mesh.Neighbors(ctx); err == nil {

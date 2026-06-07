@@ -115,6 +115,7 @@ func main() {
 	collector := topology.NewCollector(id.NodeID(), cfg.Serial,
 		topology.BatctlMesh{Interface: cfg.BatmanIface},
 		wifiClients,
+		topology.SysfsBackhaul{Iface: cfg.BackhaulIface},
 	)
 
 	// Passively cache controller announcements so /scan answers instantly.

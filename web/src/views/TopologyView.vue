@@ -30,6 +30,10 @@ const style: cytoscape.StylesheetStyle[] = [
     },
   },
   { selector: '.node--self', style: { 'background-color': '#f59e0b', width: 34, height: 34 } },
+  // Backhaul type: a solid border marks a wired node, a dashed border a
+  // wireless one, so an operator can see how each node reaches the mesh.
+  { selector: '.node--eth', style: { 'border-width': 3, 'border-color': '#22d3ee', 'border-style': 'solid' } },
+  { selector: '.node--wifi', style: { 'border-width': 3, 'border-color': '#a78bfa', 'border-style': 'dashed' } },
   {
     selector: '.client',
     style: { 'background-color': '#64748b', shape: 'round-rectangle', width: 18, height: 18 },
