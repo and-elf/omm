@@ -29,7 +29,11 @@ Band is the friendly knob, since radio names are device-specific — `radio0` is
 5 GHz on some boards and 2.4 GHz on others. The two interfaces:
 
 - **`omm_mesh`** — the 802.11s backhaul, `mesh_id` = `mesh_ssid`, SAE-encrypted
-  when `mesh_key` is set, so other nodes mesh in.
+  when `mesh_key` is set, so other nodes mesh in. Starting this interface
+  requires a **mesh-capable `wpad`** on the node; without it the node degrades to
+  a wired multi-AP (`omm_ap` only). See the two-tier
+  [Backhaul & Mesh Model](network-model.md#backhaul--mesh-model) and
+  [Wireless backhaul requirements](openwrt.md#wireless-backhaul-requirements-80211s).
 - **`omm_ap`** — a client-facing access point, `ssid` = `ap_ssid` (falling back
   to `mesh_ssid`) with `ap_key`/`mesh_key` as a WPA2 passphrase, so phones and
   laptops can join the Home and get an address.
