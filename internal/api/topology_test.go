@@ -12,7 +12,7 @@ import (
 func TestTopologyEndpoint(t *testing.T) {
 	db, _ := storage.OpenDB(":memory:")
 	t.Cleanup(func() { db.Close() })
-	collector := topology.NewCollector("self-1", "Gateway", nil, nil, nil)
+	collector := topology.NewCollector("self-1", "Gateway", nil, nil, nil, nil)
 	router := NewRouter(storage.NewStore(db), noopProfileManager{}, WithTopology(collector))
 
 	rw := doGet(t, router, "/topology")
@@ -31,7 +31,7 @@ func TestTopologyEndpoint(t *testing.T) {
 func TestTopologyAggregatesReports(t *testing.T) {
 	db, _ := storage.OpenDB(":memory:")
 	t.Cleanup(func() { db.Close() })
-	collector := topology.NewCollector("ctrl", "Gateway", nil, nil, nil)
+	collector := topology.NewCollector("ctrl", "Gateway", nil, nil, nil, nil)
 	router := NewRouter(storage.NewStore(db), noopProfileManager{}, WithTopology(collector))
 
 	// A member node reports its local view.

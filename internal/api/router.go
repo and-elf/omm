@@ -244,7 +244,7 @@ func (h *apiHandler) registerMeshRoutes(r chi.Router) {
 // registerManagementRoutes registers the admin/UI plane, including the PWA
 // catch-all (last, so specific API routes win).
 func (h *apiHandler) registerManagementRoutes(r chi.Router) {
-	r.Get("/status", statusHandler)
+	r.Get("/status", h.status)
 	r.Get("/setup", h.getSetup)
 	r.Post("/setup/complete", h.completeSetup)
 	if h.provisionUplink != nil {
@@ -294,8 +294,22 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, statusResponse{Status: "ok"})
 }
 
-func statusHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, statusResponse{Status: "ready"})
+// managementStatus reports daemon readiness plus the applied wireless-backhaul
+// outcome (802.11s mesh vs degraded multi-AP), so LuCI can show whether the
+// mesh formed and, when degraded, why and how to fix it.
+type managementStatusResponse struct {
+	Status   string               `json:"status"`
+	Backhaul models.BackhaulState `json:"backhaul"`
+}
+
+func (h *apiHandler) status(w http.ResponseWriter, r *http.Request) {
+	state := models.BackhaulState{Mode: models.BackhaulModeUnknown}
+	if h.store != nil {
+		if s, err := h.store.GetBackhaulState(r.Context()); err == nil {
+			state = s
+		}
+	}
+	writeJSON(w, http.StatusOK, managementStatusResponse{Status: "ready", Backhaul: state})
 }
 
 func (h *apiHandler) listHomes(w http.ResponseWriter, r *http.Request) {

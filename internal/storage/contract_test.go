@@ -149,6 +149,35 @@ func TestSettingsDefaultsAndRoundTrip(t *testing.T) {
 	}
 }
 
+// Backhaul state defaults to unknown when unset and round-trips, including the
+// reason/remediation carried when a node degrades to multi-AP.
+func TestBackhaulStateDefaultsAndRoundTrip(t *testing.T) {
+	store, ctx := newStore(t)
+
+	if v, err := store.GetBackhaulState(ctx); err != nil || v.Mode != models.BackhaulModeUnknown {
+		t.Fatalf("backhaul default: got %+v err %v", v, err)
+	}
+
+	degraded := models.BackhaulState{
+		Mode:        models.BackhaulModeMultiAP,
+		Reason:      "802.11s unavailable",
+		Remediation: "install wpad-mesh-wolfssl",
+	}
+	if err := store.SetBackhaulState(ctx, degraded); err != nil {
+		t.Fatalf("set backhaul: %v", err)
+	}
+	if v, _ := store.GetBackhaulState(ctx); v != degraded {
+		t.Fatalf("backhaul round-trip: got %+v want %+v", v, degraded)
+	}
+
+	// Last-writer-wins, and clearing reason/remediation on a mesh-up result.
+	up := models.BackhaulState{Mode: models.BackhaulMode80211s}
+	_ = store.SetBackhaulState(ctx, up)
+	if v, _ := store.GetBackhaulState(ctx); v != up {
+		t.Fatalf("backhaul overwrite: got %+v want %+v", v, up)
+	}
+}
+
 // Enrollments must be retrievable by id and by node id, listable with an
 // optional status filter, and ordered by created_at.
 func TestEnrollmentByNodeAndListOrder(t *testing.T) {

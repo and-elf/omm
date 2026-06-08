@@ -35,6 +35,10 @@ type Store interface {
 	SetActiveHome(ctx context.Context, homeID string) error
 	GetSetupComplete(ctx context.Context) (bool, error)
 	SetSetupComplete(ctx context.Context, complete bool) error
+	// GetBackhaulState returns the applied wireless-backhaul outcome (802.11s
+	// mesh vs degraded multi-AP). An unset state reports mode "unknown".
+	GetBackhaulState(ctx context.Context) (models.BackhaulState, error)
+	SetBackhaulState(ctx context.Context, state models.BackhaulState) error
 	// Reset clears all stored state, returning the device to its
 	// just-installed condition.
 	Reset(ctx context.Context) error
@@ -43,6 +47,7 @@ type Store interface {
 const (
 	settingActiveHome    = "active_home"
 	settingSetupComplete = "setup_complete"
+	settingBackhaulState = "backhaul_state"
 )
 
 type boltStore struct {
@@ -302,6 +307,31 @@ func (s *boltStore) SetSetupComplete(ctx context.Context, complete bool) error {
 		value = "1"
 	}
 	return s.setSetting(settingSetupComplete, value)
+}
+
+// GetBackhaulState returns the applied backhaul outcome, defaulting to mode
+// "unknown" when no profile has been applied yet (unset key).
+func (s *boltStore) GetBackhaulState(ctx context.Context) (models.BackhaulState, error) {
+	raw, err := s.getSetting(settingBackhaulState)
+	if err != nil {
+		return models.BackhaulState{}, err
+	}
+	if raw == "" {
+		return models.BackhaulState{Mode: models.BackhaulModeUnknown}, nil
+	}
+	var state models.BackhaulState
+	if err := json.Unmarshal([]byte(raw), &state); err != nil {
+		return models.BackhaulState{}, fmt.Errorf("decode backhaul state: %w", err)
+	}
+	return state, nil
+}
+
+func (s *boltStore) SetBackhaulState(ctx context.Context, state models.BackhaulState) error {
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("encode backhaul state: %w", err)
+	}
+	return s.setSetting(settingBackhaulState, string(payload))
 }
 
 // getSetting returns the empty string for an unset key; unset is a normal state.

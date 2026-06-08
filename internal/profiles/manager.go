@@ -3,11 +3,27 @@ package profiles
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/storage"
 	"github.com/and-elf/omm/internal/uci"
 )
+
+// degradeReason / degradeRemediation explain a 802.11s -> multi-AP fallback to
+// the operator (surfaced via /status and the LuCI app).
+const (
+	degradeReason      = "802.11s mesh did not start — no mesh-capable wpad on this node"
+	degradeRemediation = "install wpad-mesh-wolfssl (or -mbedtls to match the image) and re-apply the profile"
+)
+
+// MeshInspector reports whether the mesh wifi-iface in the named UCI section is
+// actually running. ApplyProfile uses it to verify the 802.11s backhaul came up
+// and, if it did not, degrade to a wired multi-AP. Injected so the manager is
+// testable off-OpenWrt; a nil inspector means "cannot verify, assume mesh".
+type MeshInspector interface {
+	MeshUp(ctx context.Context, section string) (bool, error)
+}
 
 type ProfileManager interface {
 	ApplyProfile(ctx context.Context, profile models.Profile) error
@@ -27,6 +43,9 @@ type Config struct {
 	// Radio is the wifi-device that hosts the home's mesh + client AP
 	// (default "radio0").
 	Radio string
+	// Mesh verifies the 802.11s backhaul came up after apply, enabling the
+	// automatic degrade to multi-AP. nil disables verification (assume mesh).
+	Mesh MeshInspector
 }
 
 func (c Config) withDefaults() Config {
@@ -39,11 +58,12 @@ func (c Config) withDefaults() Config {
 type Manager struct {
 	store     storage.Store
 	uciClient uci.Client
+	mesh      MeshInspector
 	cfg       Config
 }
 
 func NewManager(store storage.Store, uciClient uci.Client, cfg Config) ProfileManager {
-	return &Manager{store: store, uciClient: uciClient, cfg: cfg.withDefaults()}
+	return &Manager{store: store, uciClient: uciClient, mesh: cfg.Mesh, cfg: cfg.withDefaults()}
 }
 
 // ApplyProfile authors the home's wireless from scratch and applies it. It
@@ -142,7 +162,60 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 		return fmt.Errorf("reload config: %w", err)
 	}
 
+	// Verify the 802.11s backhaul actually came up and degrade to a wired
+	// multi-AP if it did not, recording the outcome for /status and LuCI.
+	state, err := m.verifyBackhaul(ctx, profile)
+	if err != nil {
+		return err
+	}
+	if m.store != nil {
+		if err := m.store.SetBackhaulState(ctx, state); err != nil {
+			return fmt.Errorf("record backhaul state: %w", err)
+		}
+	}
+
 	return nil
+}
+
+// verifyBackhaul determines the wireless-backhaul outcome after a profile is
+// applied. When 802.11s was configured but the mesh interface did not start
+// (typically: no mesh-capable wpad), it removes the mesh section so the radio
+// re-sets cleanly with the AP alone, and returns a degraded multi-AP state with
+// an operator-facing reason and remediation.
+func (m *Manager) verifyBackhaul(ctx context.Context, profile models.Profile) (models.BackhaulState, error) {
+	// No mesh configured: the node is a wired multi-AP by choice, not a degrade.
+	if profile.MeshSSID == "" {
+		return models.BackhaulState{Mode: models.BackhaulModeMultiAP}, nil
+	}
+	// Cannot verify (no inspector, or the probe failed): assume the configured
+	// mesh is in effect rather than tear down a possibly-working backhaul.
+	if m.mesh == nil {
+		return models.BackhaulState{Mode: models.BackhaulMode80211s}, nil
+	}
+	up, err := m.mesh.MeshUp(ctx, meshSection)
+	if err != nil {
+		log.Printf("backhaul: mesh verification failed, assuming 802.11s: %v", err)
+		return models.BackhaulState{Mode: models.BackhaulMode80211s}, nil
+	}
+	if up {
+		return models.BackhaulState{Mode: models.BackhaulMode80211s}, nil
+	}
+
+	log.Printf("backhaul: 802.11s mesh did not start; degrading to wired multi-AP")
+	if err := m.uciClient.Delete(ctx, "wireless", meshSection); err != nil {
+		return models.BackhaulState{}, fmt.Errorf("disable mesh iface: %w", err)
+	}
+	if err := m.uciClient.Commit(ctx, "wireless"); err != nil {
+		return models.BackhaulState{}, fmt.Errorf("commit wireless after degrade: %w", err)
+	}
+	if err := m.uciClient.Reload(ctx); err != nil {
+		return models.BackhaulState{}, fmt.Errorf("reload after degrade: %w", err)
+	}
+	return models.BackhaulState{
+		Mode:        models.BackhaulModeMultiAP,
+		Reason:      degradeReason,
+		Remediation: degradeRemediation,
+	}, nil
 }
 
 // resolveRadio picks the wifi-device for a profile. An explicit Radio wins;

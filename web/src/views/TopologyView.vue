@@ -34,6 +34,9 @@ const style: cytoscape.StylesheetStyle[] = [
   // wireless one, so an operator can see how each node reaches the mesh.
   { selector: '.node--eth', style: { 'border-width': 3, 'border-color': '#22d3ee', 'border-style': 'solid' } },
   { selector: '.node--wifi', style: { 'border-width': 3, 'border-color': '#a78bfa', 'border-style': 'dashed' } },
+  // A node running as multi-AP (802.11s degraded/unavailable) is tinted amber so
+  // the fallback stands out per node.
+  { selector: '.node--multiap', style: { 'background-color': '#f59e0b' } },
   {
     selector: '.client',
     style: { 'background-color': '#64748b', shape: 'round-rectangle', width: 18, height: 18 },
@@ -102,6 +105,7 @@ onBeforeUnmount(() => cy.value?.destroy())
       <span><i class="dot dot--self"></i> this device</span>
       <span><i class="dot dot--node"></i> mesh node</span>
       <span><i class="dot dot--client"></i> client</span>
+      <span><i class="dot dot--multiap"></i> multi-AP (no 802.11s) ⚠</span>
       <span><i class="line line--good"></i> good</span>
       <span><i class="line line--fair"></i> fair</span>
       <span><i class="line line--weak"></i> weak</span>
@@ -148,6 +152,9 @@ onBeforeUnmount(() => cy.value?.destroy())
 .dot--client {
   background: #64748b;
   border-radius: 3px;
+}
+.dot--multiap {
+  background: #f59e0b;
 }
 .line {
   width: 16px;

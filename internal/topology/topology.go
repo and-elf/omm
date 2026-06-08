@@ -16,6 +16,11 @@ type Node struct {
 	// graph (its "self" node) and rides along when the aggregator demotes that
 	// node, so the controller can show each node's backhaul type.
 	Backhaul string `json:"backhaul,omitempty"`
+	// MeshMode is the wireless-backhaul technology actually in effect on this
+	// node: "802.11s" when the mesh formed, or "multi_ap" when it degraded.
+	// Like Backhaul it is set on the reporting node's "self" vertex and rides
+	// along through aggregation so the controller can show each node's mode.
+	MeshMode string `json:"mesh_mode,omitempty"`
 }
 
 // Link is a mesh link between two nodes with its batman-adv transmit quality
@@ -59,6 +64,13 @@ type ClientSource interface {
 	Clients(ctx context.Context) ([]Client, error)
 }
 
+// MeshModeSource yields this node's wireless-backhaul mode ("802.11s",
+// "multi_ap" or "unknown") so the topology can show whether each node formed a
+// mesh or degraded to a wired AP.
+type MeshModeSource interface {
+	MeshMode(ctx context.Context) string
+}
+
 // Collector assembles a Graph from this node's point of view.
 type Collector struct {
 	selfID    string
@@ -66,14 +78,16 @@ type Collector struct {
 	mesh      MeshSource
 	clients   ClientSource
 	backhaul  BackhaulSource
+	meshMode  MeshModeSource
 }
 
-// NewCollector builds a collector. mesh, clients and/or backhaul may be nil.
-func NewCollector(selfID, selfLabel string, mesh MeshSource, clients ClientSource, backhaul BackhaulSource) *Collector {
+// NewCollector builds a collector. mesh, clients, backhaul and/or meshMode may
+// be nil.
+func NewCollector(selfID, selfLabel string, mesh MeshSource, clients ClientSource, backhaul BackhaulSource, meshMode MeshModeSource) *Collector {
 	if selfLabel == "" {
 		selfLabel = selfID
 	}
-	return &Collector{selfID: selfID, selfLabel: selfLabel, mesh: mesh, clients: clients, backhaul: backhaul}
+	return &Collector{selfID: selfID, selfLabel: selfLabel, mesh: mesh, clients: clients, backhaul: backhaul, meshMode: meshMode}
 }
 
 // Collect gathers the current topology. Source errors are tolerated so a
@@ -84,6 +98,10 @@ func (c *Collector) Collect(ctx context.Context) Graph {
 
 	if c.backhaul != nil {
 		g.Nodes[0].Backhaul = c.backhaul.Backhaul(ctx)
+	}
+
+	if c.meshMode != nil {
+		g.Nodes[0].MeshMode = c.meshMode.MeshMode(ctx)
 	}
 
 	if c.mesh != nil {

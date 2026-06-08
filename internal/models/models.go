@@ -38,6 +38,26 @@ type Profile struct {
 	VLANs []string `json:"vlans"`
 }
 
+// Backhaul mode: the wireless-backhaul technology actually in effect on a node
+// after a profile is applied. Distinct from topology's ethernet/wireless
+// "backhaul" (the physical uplink); this is whether the 802.11s mesh formed or
+// the node degraded to a wired multi-AP. See doc/network-model.md.
+const (
+	BackhaulMode80211s  = "802.11s"  // omm_mesh came up: true wireless mesh
+	BackhaulModeMultiAP = "multi_ap" // AP only (mesh unavailable, or none configured)
+	BackhaulModeUnknown = "unknown"  // no profile applied yet
+)
+
+// BackhaulState is the applied wireless-backhaul outcome for a node. When the
+// node was configured for 802.11s but the mesh could not start (no mesh-capable
+// wpad), Mode is multi_ap and Reason/Remediation explain the degrade so the UI
+// can tell the operator what happened and how to fix it.
+type BackhaulState struct {
+	Mode        string `json:"mode"`
+	Reason      string `json:"reason,omitempty"`
+	Remediation string `json:"remediation,omitempty"`
+}
+
 // EnrollmentStatus tracks a node through the enrollment flow.
 type EnrollmentStatus string
 

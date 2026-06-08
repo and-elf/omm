@@ -9,17 +9,26 @@ overview.
 ## Status
 
 ```text
-meshd.status
+meshd.status        # HTTP: GET /status
 ```
 
-Returns:
+Returns daemon readiness plus the applied **wireless-backhaul** outcome:
 
 ```json
 {
-  "state": "active",
-  "home": "Home"
+  "status": "ready",
+  "backhaul": {
+    "mode": "multi_ap",
+    "reason": "802.11s mesh did not start — no mesh-capable wpad on this node",
+    "remediation": "install wpad-mesh-wolfssl (or -mbedtls to match the image) and re-apply the profile"
+  }
 }
 ```
+
+`backhaul.mode` is `802.11s` when the mesh formed, `multi_ap` when it degraded to
+a wired multi-AP (see the [automatic fallback](network-model.md#automatic-fallback)),
+or `unknown` before any profile is applied. `reason` and `remediation` are
+present only on a degrade.
 
 ---
 
@@ -34,11 +43,17 @@ batman-adv links with transmit quality (TQ), and associated clients with signal
 (RSSI), band and tx/rx rates. Sources are `batctl o` (originators) and hostapd
 `get_clients` over ubus; the PWA renders it with Cytoscape.js.
 
+Each node's vertex also carries `backhaul` (ethernet/wireless — the physical
+uplink) and `mesh_mode` (`802.11s`/`multi_ap` — the wireless-backhaul tier), so
+the graph shows how every node reaches the mesh and whether it formed an 802.11s
+mesh or degraded to a wired AP.
+
 Topology is aggregated across the mesh: each node periodically pushes its local
 view to the controllers it has joined (`POST /topology/report`), and a
 controller's `GET /topology` merges its own view with fresh member reports
-(deduplicating nodes/links/clients, keeping the strongest TQ per link). A leaf
-node's `GET /topology` shows just its local view.
+(deduplicating nodes/links/clients, keeping the strongest TQ per link, and
+enriching a node with the `backhaul`/`mesh_mode` it self-reports). A leaf node's
+`GET /topology` shows just its local view.
 
 ---
 

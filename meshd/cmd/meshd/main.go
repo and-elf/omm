@@ -56,6 +56,14 @@ func main() {
 	}
 	defer uciClient.Close()
 
+	// ubus client: shared by the topology collector (batman/hostapd reads) and
+	// the profile manager's mesh verification (network.wireless status).
+	ubusClient, err := ubus.NewClient(ubus.Options{SocketPath: cfg.UbusSocket, BinaryPath: cfg.UbusBinary})
+	if err != nil {
+		log.Fatalf("failed to create ubus client: %v", err)
+	}
+	defer ubusClient.Close()
+
 	// This daemon's Home CA signs a leaf certificate for each node it adopts;
 	// its certificate is the trust anchor nodes pin (TOFU) for mesh TLS.
 	homeCA, err := identity.LoadOrCreateCA(cfg.IdentityDir, "home-"+cfg.HomeID)
@@ -95,7 +103,10 @@ func main() {
 		}
 	}
 
-	profileManager := profiles.NewManager(store, uciClient, profiles.Config{Radio: cfg.SetupAPRadio})
+	profileManager := profiles.NewManager(store, uciClient, profiles.Config{
+		Radio: cfg.SetupAPRadio,
+		Mesh:  profiles.UbusMeshInspector{Ubus: ubusClient},
+	})
 	enrollSvc := enrollment.NewService(store, enrollment.Options{HomeID: cfg.HomeID, AutoAdopt: cfg.AutoAdopt, CA: homeCA})
 
 	// First-boot setup AP: while the device is unclaimed (setup not complete) it
@@ -107,17 +118,16 @@ func main() {
 		Key:   cfg.SetupAPKey,
 	})
 
-	// Topology collector: batman-adv link quality + hostapd client RSSI.
-	ubusClient, err := ubus.NewClient(ubus.Options{SocketPath: cfg.UbusSocket, BinaryPath: cfg.UbusBinary})
-	if err != nil {
-		log.Fatalf("failed to create ubus client: %v", err)
-	}
-	defer ubusClient.Close()
+	// Topology collector: batman-adv link quality + hostapd client RSSI, plus
+	// this node's backhaul type and wireless-backhaul mode (802.11s vs multi-AP,
+	// read from the applied backhaul state) so the controller can show both per
+	// node across the mesh.
 	wifiClients := topology.UbusClients{Ubus: ubusClient, Interfaces: cfg.APInterfaces}
 	collector := topology.NewCollector(id.NodeID(), cfg.Serial,
 		topology.BatctlMesh{Interface: cfg.BatmanIface},
 		wifiClients,
 		topology.SysfsBackhaul{Iface: cfg.BackhaulIface},
+		storeMeshMode{store: store},
 	)
 
 	// Passively cache controller announcements so /scan answers instantly.
@@ -320,6 +330,19 @@ func ledReactorLoop(ctx context.Context, store storage.Store, led deviceled.LEDC
 		case <-ticker.C:
 		}
 	}
+}
+
+// storeMeshMode adapts the store to topology.MeshModeSource, so this node
+// reports its applied wireless-backhaul mode (802.11s vs multi-AP) on its own
+// topology vertex. An unreadable state reports "unknown".
+type storeMeshMode struct{ store storage.Store }
+
+func (s storeMeshMode) MeshMode(ctx context.Context) string {
+	state, err := s.store.GetBackhaulState(ctx)
+	if err != nil {
+		return models.BackhaulModeUnknown
+	}
+	return state.Mode
 }
 
 // resolveBSSID returns this controller's mesh BSSID: the explicit MESHD_BSSID,
