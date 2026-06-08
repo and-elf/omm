@@ -45,6 +45,12 @@ controller (even one with no radios, such as a Raspberry Pi) and a wifi AP
 plugged into the same network. Across a router, use an explicit join URL
 (`MESHD_JOIN` / the enrollment UI).
 
+> An unclaimed node is a router by default (routed, firewalled `wan`), which is
+> *not* on the controller's bridged LAN and drops the discovery broadcast. The
+> [network posture](network-posture.md) model fixes this: while unclaimed a node
+> takes the **Guest** dumb-AP posture (uplink bridged into `lan`), so it is
+> L2-adjacent to the controller and discovery works.
+
 ---
 
 ## First Boot

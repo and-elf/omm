@@ -49,6 +49,20 @@ type Config struct {
 	APInterfaces  []string // hostapd interfaces to read clients from
 	BackhaulIface string   // ethernet uplink interface used to classify backhaul (e.g. eth0); empty => unknown
 
+	// Network posture: meshd manages network/dhcp/firewall by lifecycle state
+	// (unclaimed -> Guest dumb-AP so discovery works; claimed controller ->
+	// gateway; joined node -> mesh node). Opt-in (default false) because it
+	// reconfigures the network and can strand a hand-wired device; enable only
+	// after verifying the Guest transition on the target board. UplinkPort is the
+	// wired uplink device bridged into br-lan in Guest posture; empty (default)
+	// auto-detects it from network.wan.device, so any jack works without
+	// per-board config (incl. a single-jack AP wired as `wan`). LanDevice is the
+	// UCI section of the LAN bridge device whose `ports` it edits. See
+	// doc/network-posture.md.
+	ManageNetwork bool
+	UplinkPort    string
+	LanDevice     string
+
 	// First-boot setup AP (brought up while the device is unclaimed).
 	SetupAPEnabled bool   // bring up the setup AP while unclaimed (default true)
 	SetupAPRadio   string // wifi-device hosting the setup AP (default radio0)
@@ -113,6 +127,10 @@ func Load() Config {
 		BatmanIface:   envOr("MESHD_BATMAN_IFACE", "bat0"),
 		APInterfaces:  splitList(os.Getenv("MESHD_AP_IFACES")),
 		BackhaulIface: os.Getenv("MESHD_BACKHAUL_IFACE"),
+
+		ManageNetwork: envBool("MESHD_MANAGE_NETWORK"),
+		UplinkPort:    os.Getenv("MESHD_UPLINK_PORT"),
+		LanDevice:     envOr("MESHD_LAN_DEVICE", "@device[0]"),
 
 		SetupAPEnabled: envBoolOr("MESHD_SETUP_AP", true),
 		SetupAPRadio:   envOr("MESHD_SETUP_AP_RADIO", "radio0"),

@@ -29,6 +29,12 @@ type Client interface {
 	SetSection(ctx context.Context, packageName, section, sectionType string, values map[string]string) error
 	// Delete removes an entire named section from a config.
 	Delete(ctx context.Context, packageName, section string) error
+	// AddListItem appends value to a list-valued option (UCI `add_list`), e.g. a
+	// bridge device's `ports`. Idempotent in rpcd: adding an existing value is a
+	// no-op.
+	AddListItem(ctx context.Context, packageName, section, option, value string) error
+	// DelListItem removes value from a list-valued option (UCI `del_list`).
+	DelListItem(ctx context.Context, packageName, section, option, value string) error
 	Commit(ctx context.Context, packageName string) error
 	// Reload applies committed configuration to the running system. A bare
 	// `uci commit` only rewrites the config files; netifd has to be told to
@@ -146,6 +152,26 @@ func (c *client) Delete(ctx context.Context, packageName, section string) error 
 		"section": section,
 	}
 	return c.ubusClient.Call(ctx, "uci", "delete", params, nil)
+}
+
+func (c *client) AddListItem(ctx context.Context, packageName, section, option, value string) error {
+	params := map[string]interface{}{
+		"config":  packageName,
+		"section": section,
+		"option":  option,
+		"values":  []string{value},
+	}
+	return c.ubusClient.Call(ctx, "uci", "add_list", params, nil)
+}
+
+func (c *client) DelListItem(ctx context.Context, packageName, section, option, value string) error {
+	params := map[string]interface{}{
+		"config":  packageName,
+		"section": section,
+		"option":  option,
+		"values":  []string{value},
+	}
+	return c.ubusClient.Call(ctx, "uci", "del_list", params, nil)
 }
 
 func (c *client) Commit(ctx context.Context, packageName string) error {

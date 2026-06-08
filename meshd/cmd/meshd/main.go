@@ -20,6 +20,7 @@ import (
 	"github.com/and-elf/omm/internal/enrollment"
 	"github.com/and-elf/omm/internal/identity"
 	"github.com/and-elf/omm/internal/models"
+	"github.com/and-elf/omm/internal/netposture"
 	"github.com/and-elf/omm/internal/onboard"
 	"github.com/and-elf/omm/internal/profiles"
 	"github.com/and-elf/omm/internal/selection"
@@ -107,6 +108,27 @@ func main() {
 		Radio: cfg.SetupAPRadio,
 		Mesh:  profiles.UbusMeshInspector{Ubus: ubusClient},
 	})
+
+	// Network posture: keep the node's network/dhcp/firewall aligned with its
+	// lifecycle (Guest dumb-AP while unclaimed so discovery works, gateway once
+	// it controls its home). Opt-in; default off so a hand-wired device is never
+	// reconfigured unexpectedly. applyPosture is a no-op when disabled.
+	posture := netposture.NewManager(uciClient, netposture.Config{
+		UplinkPort: cfg.UplinkPort,
+		LanDevice:  cfg.LanDevice,
+	})
+	applyPosture := func(ctx context.Context) {
+		if !cfg.ManageNetwork {
+			return
+		}
+		active, _ := store.GetActiveHome(ctx)
+		role := netposture.DecideRole(active, cfg.HomeID)
+		if err := posture.Apply(ctx, role); err != nil {
+			log.Printf("netposture: apply %s failed (non-fatal): %v", role, err)
+			return
+		}
+		log.Printf("netposture: applied %s posture", role)
+	}
 	enrollSvc := enrollment.NewService(store, enrollment.Options{HomeID: cfg.HomeID, AutoAdopt: cfg.AutoAdopt, CA: homeCA})
 
 	// First-boot setup AP: while the device is unclaimed (setup not complete) it
@@ -143,7 +165,10 @@ func main() {
 	// auto-onboard — so the first-boot setup AP (and any uplink station) comes
 	// down exactly once, however setup finishes.
 	completeSetupLocal := func(ctx context.Context) error {
-		return setupAP.Disable(ctx)
+		err := setupAP.Disable(ctx)
+		// Claimed now: re-evaluate posture (Guest -> controller/mesh node).
+		applyPosture(ctx)
+		return err
 	}
 
 	apiOpts := []api.Option{
@@ -234,10 +259,18 @@ func main() {
 		}()
 	}
 
+	// Align network posture with the current lifecycle state at boot (Guest
+	// dumb-AP while unclaimed so discovery works). No-op unless MANAGE_NETWORK.
+	applyPosture(ctx)
+
 	// Pick and apply a Home when none is active yet. autoSelectHome is
 	// idempotent (it respects an already-set active Home), so it is safe to run
-	// again after each join lands.
-	autoSelect := func() { autoSelectHome(ctx, store, profileManager, wifiClients, cfg.HomeID) }
+	// again after each join lands. Re-evaluate posture afterwards, since gaining
+	// an active Home transitions a Guest to controller/mesh-node.
+	autoSelect := func() {
+		autoSelectHome(ctx, store, profileManager, wifiClients, cfg.HomeID)
+		applyPosture(ctx)
+	}
 
 	if len(cfg.Join) == 0 {
 		// No joins configured: select from the Homes already known.
