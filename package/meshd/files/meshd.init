@@ -9,7 +9,7 @@ start_service() {
 	config_load meshd
 
 	local role http_addr mgmt_addr mesh_addr database_path udp_listen home_id home_name controller_id
-	local auto_adopt controller_url identity_dir serial backhaul_iface led_enabled led_name auto_onboard_wired
+	local adopt_policy controller_url identity_dir serial backhaul_iface led_enabled led_name auto_onboard_wired
 	local manage_network uplink_port lan_device onboard_grace mesh_ssid mesh_key
 
 	config_get role main role controller
@@ -26,7 +26,7 @@ start_service() {
 	config_get controller_id main controller_id gw01
 	config_get mesh_ssid main mesh_ssid ""
 	config_get mesh_key main mesh_key ""
-	config_get auto_adopt main auto_adopt 0
+	config_get adopt_policy main adopt_policy off
 	config_get controller_url main controller_url ""
 	config_get identity_dir main identity_dir /etc/meshd/identity
 	config_get serial main serial ""
@@ -53,7 +53,7 @@ start_service() {
 		MESHD_CONTROLLER_ID="$controller_id" \
 		MESHD_MESH_SSID="$mesh_ssid" \
 		MESHD_MESH_KEY="$mesh_key" \
-		MESHD_AUTO_ADOPT="$auto_adopt" \
+		MESHD_ADOPT_POLICY="$adopt_policy" \
 		MESHD_CONTROLLER="$controller_url" \
 		MESHD_IDENTITY_DIR="$identity_dir" \
 		MESHD_SERIAL="$serial" \

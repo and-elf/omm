@@ -94,9 +94,27 @@ It is **opt-in** (default off): a freshly-flashed node on an untrusted LAN shoul
 not silently join whatever controller happens to be announcing. It runs only
 when no explicit `MESHD_JOIN` controllers are configured, so it never races an
 operator's configured joins. And because completion is unattended, the join only
-finishes without a human when the **controller** auto-adopts (`MESHD_AUTO_ADOPT`
-on that controller); otherwise the node waits in `pending_approval` until an
-operator approves it.
+finishes without a human when the **controller's adopt policy** allows it (see
+below); otherwise the node waits in `pending_approval` until an operator approves
+it.
+
+### Adoption policy (controller-side trust)
+
+Whether a node is adopted is the **controller's** decision, never the node's —
+an enrolling node can claim anything, so trust is gated on what the controller
+can *observe*, not on the node's self-declared backhaul. The controller's
+`adopt_policy` (`MESHD_ADOPT_POLICY`):
+
+| Policy | Behaviour |
+|--------|-----------|
+| `off` (default) | Never auto-adopt; an operator approves each node. |
+| `onlink` | Auto-adopt only nodes whose enrollment arrives on the controller's **own LAN subnet** (verified from the request source — physically on the home network). Recommended for a kit. |
+| `always` | Auto-adopt any node that enrolls, from anywhere (trusted lab / test). |
+
+`onlink` is the safe enabler for plug-and-play: a node cabled into the home is
+adopted automatically, while one across a router or on the WAN side is not —
+without trusting the node's word about being "wired". (The legacy
+`MESHD_AUTO_ADOPT=1` still maps to `always` for compatibility.)
 
 **Boot ordering (grace window).** A node must not select its own (last-resort)
 Home before discovery has had a chance to surface a controller — otherwise

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,7 +24,11 @@ func setupEnrollRouter(t *testing.T, autoAdopt bool) (http.Handler, storage.Stor
 	}
 	t.Cleanup(func() { db.Close() })
 	store := storage.NewStore(db)
-	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AutoAdopt: autoAdopt})
+	policy := enrollment.AdoptOff
+	if autoAdopt {
+		policy = enrollment.AdoptAlways
+	}
+	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AdoptPolicy: policy})
 	return NewRouter(store, noopProfileManager{}, WithEnrollment(svc)), store
 }
 
@@ -38,6 +43,45 @@ func postJSON(t *testing.T, router http.Handler, path string, payload any) *http
 	rw := httptest.NewRecorder()
 	router.ServeHTTP(rw, req)
 	return rw
+}
+
+// The controller's AdoptOnlink policy is gated by the handler's on-link check
+// (the verifiable request source), not the node's word: an on-link peer is
+// auto-adopted, an off-link one is left pending.
+func TestEnrollOnlinkPolicyGatedByHandler(t *testing.T) {
+	for _, onlink := range []bool{true, false} {
+		db, err := storage.OpenDB(":memory:")
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		t.Cleanup(func() { db.Close() })
+		store := storage.NewStore(db)
+		svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AdoptPolicy: enrollment.AdoptOnlink})
+		router := NewRouter(store, noopProfileManager{}, WithEnrollment(svc),
+			WithOnLink(func(net.IP) bool { return onlink }))
+		id, _ := identity.Generate()
+
+		rw := postJSON(t, router, "/enroll/request", enrollment.RequestInput{
+			NodeID: id.NodeID(), Serial: "SN1", PublicKey: id.PublicKeyDER(),
+		})
+		var reqRes enrollment.RequestResult
+		_ = json.Unmarshal(rw.Body.Bytes(), &reqRes)
+
+		sig, _ := id.Sign(reqRes.Challenge)
+		rw = postJSON(t, router, "/enroll/verify", enrollment.VerifyInput{
+			EnrollmentID: reqRes.EnrollmentID, Signature: sig,
+		})
+		var verRes enrollment.Result
+		_ = json.Unmarshal(rw.Body.Bytes(), &verRes)
+
+		want := models.EnrollmentPendingApproval
+		if onlink {
+			want = models.EnrollmentApproved
+		}
+		if verRes.Status != want {
+			t.Fatalf("onlink=%v: status=%q, want %q", onlink, verRes.Status, want)
+		}
+	}
 }
 
 func TestEnrollEndpointsAutoAdopt(t *testing.T) {

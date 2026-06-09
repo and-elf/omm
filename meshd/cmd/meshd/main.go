@@ -159,7 +159,7 @@ func main() {
 		}
 		log.Printf("netposture: applied %s posture", role)
 	}
-	enrollSvc := enrollment.NewService(store, enrollment.Options{HomeID: cfg.HomeID, AutoAdopt: cfg.AutoAdopt, CA: homeCA})
+	enrollSvc := enrollment.NewService(store, enrollment.Options{HomeID: cfg.HomeID, AdoptPolicy: enrollment.AdoptPolicy(cfg.AdoptPolicy), CA: homeCA})
 
 	// First-boot setup AP: while the device is unclaimed (setup not complete) it
 	// broadcasts a known, label-printable SSID serving its open management API,
@@ -272,7 +272,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("meshd up node_id=%s home=%s combined=%v auto_adopt=%v", id.NodeID(), cfg.HomeID, cfg.Combined(), cfg.AutoAdopt)
+	log.Printf("meshd up node_id=%s home=%s combined=%v adopt_policy=%s", id.NodeID(), cfg.HomeID, cfg.Combined(), cfg.AdoptPolicy)
 	for _, srv := range servers {
 		srv := srv
 		go func() {

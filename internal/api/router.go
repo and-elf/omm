@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -34,6 +35,46 @@ type apiHandler struct {
 	devCORS         bool
 	onSetupComplete func(ctx context.Context) error
 	provisionUplink func(ctx context.Context, ssid, key string) error
+	// onLink reports whether an IP is on one of this controller's own LAN
+	// subnets; used to gate the AdoptOnlink enrollment policy. Defaults to a
+	// net.Interfaces-based check; injectable for tests.
+	onLink func(net.IP) bool
+}
+
+// peerOnLink reports whether the request's source address is on the controller's
+// own LAN (on-link). Used so unattended adoption trusts a verifiable network
+// position rather than the node's word.
+func (h *apiHandler) peerOnLink(r *http.Request) bool {
+	if h.onLink == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return h.onLink(ip)
+}
+
+// defaultOnLink reports whether ip falls within any of this host's own
+// interface subnets — a verifiable proxy for "physically on my LAN".
+func defaultOnLink(ip net.IP) bool {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return false
+	}
+	for _, ifi := range ifaces {
+		addrs, _ := ifi.Addrs()
+		for _, a := range addrs {
+			if n, ok := a.(*net.IPNet); ok && n.Contains(ip) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Scanner discovers nearby controllers (announced Homes) so the UI can present
@@ -173,7 +214,16 @@ func newHandler(store storage.Store, profileManager profiles.ProfileManager, opt
 	for _, opt := range opts {
 		opt(h)
 	}
+	if h.onLink == nil {
+		h.onLink = defaultOnLink
+	}
 	return h
+}
+
+// WithOnLink overrides the on-link check (which gates the AdoptOnlink policy);
+// used by tests to simulate a peer on/off the controller's LAN.
+func WithOnLink(fn func(net.IP) bool) Option {
+	return func(h *apiHandler) { h.onLink = fn }
 }
 
 // NewRouter serves both planes on one handler — the combined mode used by tests

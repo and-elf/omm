@@ -41,7 +41,11 @@ func (h *apiHandler) enrollVerify(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, err)
 		return
 	}
-	result, err := h.enrollment.Verify(r.Context(), in)
+	// Tell the enrollment service whether this peer is on the controller's own
+	// LAN, so the AdoptOnlink policy trusts the verifiable source address rather
+	// than the node's self-declared backhaul.
+	ctx := enrollment.WithPeerOnLink(r.Context(), h.peerOnLink(r))
+	result, err := h.enrollment.Verify(ctx, in)
 	if err != nil {
 		respondEnrollError(w, err)
 		return

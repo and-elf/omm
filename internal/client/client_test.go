@@ -22,7 +22,11 @@ func newServer(t *testing.T, autoAdopt bool) (*httptest.Server, storage.Store, *
 	}
 	t.Cleanup(func() { db.Close() })
 	store := storage.NewStore(db)
-	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AutoAdopt: autoAdopt})
+	policy := enrollment.AdoptOff
+	if autoAdopt {
+		policy = enrollment.AdoptAlways
+	}
+	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AdoptPolicy: policy})
 	srv := httptest.NewServer(api.NewRouter(store, noopPM{}, api.WithEnrollment(svc)))
 	t.Cleanup(srv.Close)
 	return srv, store, svc
