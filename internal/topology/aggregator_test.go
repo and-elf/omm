@@ -16,9 +16,10 @@ func TestMergeUnionsReports(t *testing.T) {
 		Clients: []Client{{MAC: "c1", AP: "ctrl", Signal: -50}},
 	}
 
-	// Reports from two member nodes.
+	// Reports from two member nodes. n1 carries its own backhaul + mesh mode on
+	// its "self" vertex, which must survive demotion to a regular node.
 	agg.Ingest("n1", Graph{
-		Nodes:   []Node{{ID: "n1", Role: "self"}, {ID: "n2", Role: "node"}},
+		Nodes:   []Node{{ID: "n1", Role: "self", Backhaul: BackhaulWireless, MeshMode: "multi_ap"}, {ID: "n2", Role: "node"}},
 		Links:   []Link{{Source: "n1", Target: "n2", TQ: 180}},
 		Clients: []Client{{MAC: "c2", AP: "n1", Signal: -60}},
 	})
@@ -35,6 +36,15 @@ func TestMergeUnionsReports(t *testing.T) {
 	// Local self preserved.
 	if g.Nodes[0].ID != "ctrl" || g.Nodes[0].Role != "self" {
 		t.Fatalf("expected ctrl self first, got %+v", g.Nodes[0])
+	}
+	// A reporting node is demoted to "node" but keeps its self-reported backhaul
+	// and mesh mode, so the controller can show each node's wireless state.
+	for _, n := range g.Nodes {
+		if n.ID == "n1" {
+			if n.Role != "node" || n.Backhaul != BackhaulWireless || n.MeshMode != "multi_ap" {
+				t.Fatalf("n1 should be demoted but keep backhaul/mesh_mode, got %+v", n)
+			}
+		}
 	}
 	if len(g.Links) != 2 {
 		t.Fatalf("expected 2 links, got %d: %+v", len(g.Links), g.Links)

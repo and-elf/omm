@@ -74,21 +74,32 @@ func (a *Aggregator) Merge(local Graph) Graph {
 // MAC (first occurrence wins — newest report, since graphs are newest-first).
 func mergeGraphs(graphs []Graph) Graph {
 	out := Graph{Nodes: []Node{}, Links: []Link{}, Clients: []Client{}}
-	nodeSeen := map[string]bool{}
+	nodeIdx := map[string]int{}
 	clientSeen := map[string]bool{}
 	links := map[string]Link{}
 
 	for i, g := range graphs {
 		for _, n := range g.Nodes {
-			if nodeSeen[n.ID] {
+			if pos, ok := nodeIdx[n.ID]; ok {
+				// A node already in the graph (e.g. the controller's bare
+				// neighbor entry) gets enriched with the self-reported backhaul
+				// and mesh mode from the node's own report, which is
+				// authoritative about its own wireless state regardless of which
+				// graph mentioned it first.
+				if out.Nodes[pos].Backhaul == "" && n.Backhaul != "" {
+					out.Nodes[pos].Backhaul = n.Backhaul
+				}
+				if out.Nodes[pos].MeshMode == "" && n.MeshMode != "" {
+					out.Nodes[pos].MeshMode = n.MeshMode
+				}
 				continue
 			}
-			nodeSeen[n.ID] = true
 			// Only the local graph's node is "self"; a reporting node's own
 			// "self" becomes a regular node in the aggregate.
 			if i > 0 && n.Role == "self" {
 				n.Role = "node"
 			}
+			nodeIdx[n.ID] = len(out.Nodes)
 			out.Nodes = append(out.Nodes, n)
 		}
 		for _, l := range g.Links {

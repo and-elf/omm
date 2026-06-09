@@ -42,6 +42,27 @@ describe('topology element builder', () => {
     expect(assoc?.classes).toContain('assoc--good')
   })
 
+  it('marks a node that degraded to multi-AP and carries mesh_mode', () => {
+    const els = toElements({
+      nodes: [
+        { id: 'self', label: 'Gateway', role: 'self', backhaul: 'wireless', mesh_mode: 'multi_ap' },
+        { id: 'n2', label: 'n2', role: 'node', mesh_mode: '802.11s' },
+      ],
+      links: null,
+      clients: null,
+    })
+
+    const self = els.find((e) => e.data.id === 'self')
+    expect(self?.classes).toContain('node--multiap')
+    expect(self?.data.mesh_mode).toBe('multi_ap')
+    expect(self?.data.label).toBe('Gateway ⚠')
+
+    const n2 = els.find((e) => e.data.id === 'n2')
+    expect(n2?.classes).not.toContain('node--multiap')
+    expect(n2?.data.mesh_mode).toBe('802.11s')
+    expect(n2?.data.label).toBe('n2')
+  })
+
   it('tolerates null arrays', () => {
     expect(toElements({ nodes: null, links: null, clients: null })).toEqual([])
   })

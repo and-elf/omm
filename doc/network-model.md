@@ -101,11 +101,28 @@ roaming is basic same-SSID roaming (no 802.11r/k/v).
 A node with neither a mesh-capable `wpad` nor an ethernet uplink has no backhaul
 at all and is effectively isolated.
 
-> **Status.** The 802.11s and AP interfaces are both authored today
-> ([`internal/profiles`](../internal/profiles)). The pieces that make the tiers
-> explicit — declaring/installing a mesh-capable `wpad`, a preflight that
-> detects 802.11s support and reports a clear error instead of a silent netifd
-> failure, and the batman-adv multi-hop layer — are tracked as follow-up.
+### Automatic fallback
+
+The tier is chosen at apply time, not guessed up front. After authoring the
+802.11s + AP interfaces and reloading, `ApplyProfile` verifies the mesh actually
+came up (via `ubus call network.wireless status` — the mesh section must have a
+running ifname on an up, non-failed radio). If it did not — the usual cause is a
+node without a mesh-capable `wpad` — meshd **removes the mesh interface**, so the
+radio re-sets cleanly with the AP alone, and records a degraded multi-AP state
+with a reason and remediation. The outcome is persisted and surfaced:
+
+* **`GET /status`** returns a `backhaul` object: `{mode, reason, remediation}`
+  where `mode` is `802.11s`, `multi_ap` or `unknown`.
+* **Topology** carries each node's `mesh_mode` on its vertex (like `backhaul`),
+  so the controller — and the LuCI app — show every node's tier across the mesh.
+* The **LuCI app** shows the controller's backhaul mode and, when degraded, the
+  reason and the `wpad-mesh` remediation; degraded nodes are marked in the graph.
+
+> **Status.** Implemented: the apply-time verification, automatic degrade,
+> `/status` backhaul, and per-node `mesh_mode` in topology + LuCI. Still
+> follow-up: declaring/installing a mesh-capable `wpad` from the package, and the
+> batman-adv multi-hop layer (today the mesh is bridged directly onto `lan`, so
+> chaining beyond a single hop is not yet guaranteed).
 
 ---
 

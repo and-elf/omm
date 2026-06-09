@@ -40,9 +40,19 @@ export function toElements(topo: Topology): CyElement[] {
     if (node.role === 'self') classes.push('node--self')
     const bh = backhaulClass(node.backhaul)
     if (bh) classes.push(bh)
+    // A node that degraded to multi-AP gets a marked class and a ⚠ label
+    // suffix, so per-node fallback is visible in the graph (the border already
+    // encodes ethernet/wireless backhaul, an orthogonal axis).
+    const label = node.label || node.id
+    if (node.mesh_mode === 'multi_ap') classes.push('node--multiap')
     elements.push({
       group: 'nodes',
-      data: { id: node.id, label: node.label || node.id, backhaul: node.backhaul },
+      data: {
+        id: node.id,
+        label: node.mesh_mode === 'multi_ap' ? `${label} ⚠` : label,
+        backhaul: node.backhaul,
+        mesh_mode: node.mesh_mode,
+      },
       classes: classes.join(' '),
     })
   }

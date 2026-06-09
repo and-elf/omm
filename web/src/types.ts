@@ -42,8 +42,20 @@ export interface Profile {
   vlans: string[] | null
 }
 
+/**
+ * Applied wireless-backhaul outcome. mode is '802.11s' when the mesh formed,
+ * 'multi_ap' when it degraded to a wired multi-AP, or 'unknown' before a
+ * profile is applied. reason/remediation are present only on a degrade.
+ */
+export interface Backhaul {
+  mode: string
+  reason?: string
+  remediation?: string
+}
+
 export interface Status {
   status: string
+  backhaul?: Backhaul
 }
 
 export interface ActiveHome {
@@ -108,6 +120,8 @@ export interface TopologyNode {
   role: string
   /** How this node reaches the mesh: 'ethernet' | 'wireless' | 'unknown'. */
   backhaul?: string
+  /** Wireless-backhaul mode: '802.11s' | 'multi_ap' | 'unknown'. */
+  mesh_mode?: string
 }
 
 export interface TopologyLink {

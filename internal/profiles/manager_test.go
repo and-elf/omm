@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/and-elf/omm/internal/models"
+	"github.com/and-elf/omm/internal/storage"
 	"github.com/and-elf/omm/internal/uci"
 )
 
@@ -17,6 +18,7 @@ type fakeUCI struct {
 	ops       []string
 	sections  map[string]map[string]string
 	sets      []string                     // "pkg.section.option=value" for plain Set calls
+	deleted   []string                     // section names passed to Delete
 	wireless  map[string]map[string]string // canned Sections("wireless") response
 	reloadErr error
 }
@@ -51,7 +53,19 @@ func (f *fakeUCI) SetSection(ctx context.Context, pkg, section, sectionType stri
 
 func (f *fakeUCI) Delete(ctx context.Context, pkg, section string) error {
 	f.ops = append(f.ops, "delete:"+pkg)
+	f.deleted = append(f.deleted, section)
 	return nil
+}
+
+// fakeMesh is an injectable MeshInspector: it reports a fixed up/down result
+// (or an error) for the mesh verification step.
+type fakeMesh struct {
+	up  bool
+	err error
+}
+
+func (f fakeMesh) MeshUp(ctx context.Context, section string) (bool, error) {
+	return f.up, f.err
 }
 
 func (f *fakeUCI) Commit(ctx context.Context, pkg string) error {
@@ -238,6 +252,108 @@ func TestApplyProfileExplicitAPOverridesMeshFallback(t *testing.T) {
 	}
 	if fake.sections[meshSection]["mesh_id"] != "backhaul" {
 		t.Fatalf("mesh id wrong: %v", fake.sections[meshSection])
+	}
+}
+
+// newStore builds a real in-memory store so backhaul-state persistence is
+// exercised end-to-end (there is no fake Store in the codebase).
+func newStore(t *testing.T) storage.Store {
+	t.Helper()
+	db, err := storage.OpenDB(":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return storage.NewStore(db)
+}
+
+// When the mesh comes up, the backhaul is recorded as 802.11s and the mesh
+// section is left in place.
+func TestApplyProfileMeshUpRecords80211s(t *testing.T) {
+	fake := &fakeUCI{}
+	store := newStore(t)
+	m := NewManager(store, fake, Config{Mesh: fakeMesh{up: true}})
+
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm", MeshKey: "secret123"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if len(fake.deleted) != 0 {
+		t.Fatalf("mesh section should not be deleted when mesh is up; deleted=%v", fake.deleted)
+	}
+	state, _ := store.GetBackhaulState(context.Background())
+	if state.Mode != models.BackhaulMode80211s || state.Reason != "" {
+		t.Fatalf("want 802.11s with no reason, got %+v", state)
+	}
+}
+
+// When the mesh does not come up, meshd degrades to multi-AP: it deletes the
+// mesh section, reloads again, and records the reason + remediation.
+func TestApplyProfileMeshDownDegradesToMultiAP(t *testing.T) {
+	fake := &fakeUCI{}
+	store := newStore(t)
+	m := NewManager(store, fake, Config{Mesh: fakeMesh{up: false}})
+
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm", MeshKey: "secret123"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if !contains(fake.deleted, meshSection) {
+		t.Fatalf("expected mesh section %q to be deleted; deleted=%v", meshSection, fake.deleted)
+	}
+	// Two reloads: the initial apply, then the re-set after removing the mesh.
+	reloads := 0
+	for _, op := range fake.ops {
+		if op == "reload" {
+			reloads++
+		}
+	}
+	if reloads != 2 {
+		t.Fatalf("expected 2 reloads (apply + degrade), got %d in %v", reloads, fake.ops)
+	}
+	state, _ := store.GetBackhaulState(context.Background())
+	if state.Mode != models.BackhaulModeMultiAP || state.Reason == "" || state.Remediation == "" {
+		t.Fatalf("want degraded multi_ap with reason+remediation, got %+v", state)
+	}
+}
+
+// With no inspector wired, verification is skipped and the configured mesh is
+// assumed in effect (no spurious teardown).
+func TestApplyProfileNoInspectorAssumes80211s(t *testing.T) {
+	fake := &fakeUCI{}
+	store := newStore(t)
+	m := NewManager(store, fake, Config{})
+
+	if err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", MeshSSID: "omm"}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(fake.deleted) != 0 {
+		t.Fatalf("no inspector should not delete mesh; deleted=%v", fake.deleted)
+	}
+	state, _ := store.GetBackhaulState(context.Background())
+	if state.Mode != models.BackhaulMode80211s {
+		t.Fatalf("want 802.11s, got %+v", state)
+	}
+}
+
+// A profile with no mesh SSID is a wired multi-AP by choice — recorded as
+// multi_ap with no degrade reason, and the mesh is never verified or deleted.
+func TestApplyProfileNoMeshRecordsMultiAPWithoutReason(t *testing.T) {
+	fake := &fakeUCI{}
+	store := newStore(t)
+	m := NewManager(store, fake, Config{Mesh: fakeMesh{up: false}})
+
+	if err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", APSSID: "HomeWiFi", APKey: "guestpass"}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(fake.deleted) != 0 {
+		t.Fatalf("no mesh configured should not delete anything; deleted=%v", fake.deleted)
+	}
+	state, _ := store.GetBackhaulState(context.Background())
+	if state.Mode != models.BackhaulModeMultiAP || state.Reason != "" {
+		t.Fatalf("want multi_ap with no reason, got %+v", state)
 	}
 }
 
