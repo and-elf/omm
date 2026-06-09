@@ -140,6 +140,14 @@ Example:
 8f53dc9e-42e1-4d8d-a379-ef2f5c6c5f41
 ```
 
+A unique id is essential: discovery treats an announcement whose `home_id`
+matches the receiver's own as "self" and ignores it, so two devices sharing an
+id are invisible to each other and cannot onboard. When `home_id` is not
+configured, the daemon therefore derives a stable, unique one from the device
+identity (`home-<node-id-prefix>`) rather than falling back to a shared literal;
+the wizard / companion app replaces it with a friendly id when a Home is created
+or joined.
+
 SSID names are not authoritative.
 
 A Home may change:

@@ -10,6 +10,31 @@ func clearAddrEnv(t *testing.T) {
 	}
 }
 
+func TestDeriveHomeID(t *testing.T) {
+	// Stable: derived from the node id's prefix.
+	if got := DeriveHomeID("a7cf0e35468faaf6cf7b8d202c0d2d13"); got != "home-a7cf0e35468f" {
+		t.Fatalf("DeriveHomeID = %q, want home-a7cf0e35468f", got)
+	}
+	// Distinct node ids yield distinct home ids (the whole point — no collision).
+	a := DeriveHomeID("aaaaaaaaaaaaaaaa1111")
+	b := DeriveHomeID("bbbbbbbbbbbbbbbb2222")
+	if a == b {
+		t.Fatalf("distinct node ids collided: %q", a)
+	}
+	// Degenerate input still yields a usable id.
+	if got := DeriveHomeID(""); got != "home-unknown" {
+		t.Fatalf("DeriveHomeID(\"\") = %q, want home-unknown", got)
+	}
+}
+
+// home_id is unset by default so the daemon derives a unique one per device.
+func TestConfigHomeIDUnsetByDefault(t *testing.T) {
+	t.Setenv("MESHD_HOME_ID", "")
+	if c := Load(); c.HomeID != "" {
+		t.Fatalf("expected empty HomeID by default (derived later), got %q", c.HomeID)
+	}
+}
+
 func TestConfigDefaultsToSplitListeners(t *testing.T) {
 	clearAddrEnv(t)
 	c := Load()

@@ -98,6 +98,17 @@ finishes without a human when the **controller** auto-adopts (`MESHD_AUTO_ADOPT`
 on that controller); otherwise the node waits in `pending_approval` until an
 operator approves it.
 
+**Boot ordering (grace window).** A node must not select its own (last-resort)
+Home before discovery has had a chance to surface a controller — otherwise
+`activeHome` is set, and auto-onboard never fires. So when auto-onboard is
+enabled the daemon does **not** self-select at boot; the onboard loop tries to
+enroll first, and only after `MESHD_ONBOARD_GRACE` (UCI `onboard_grace`, default
+`20s`) elapses with **no controller discovered** does it fall back to selecting
+its own Home — i.e. become its own controller. A reachable-but-not-yet-adopting
+controller keeps the node retrying rather than falling back. This is the
+"scan on boot, then decide role" behaviour: join if a home is found, become a
+controller if none is.
+
 ---
 
 ## Create New Home
