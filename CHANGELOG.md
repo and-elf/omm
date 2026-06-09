@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Zero-config wired onboarding.** A freshly-flashed kit now comes up hands-off:
+  power the first device and it becomes its own controller; cable a node and it
+  discovers, enrolls, and receives its wireless — no wizard, no per-device
+  config. This is the sum of the items below.
+- **Unique per-device Home id.** When `home_id` is unset, the daemon derives a
+  stable, unique id from the device identity (`home-<node-id-prefix>`) instead of
+  the shared literal `default-home`. Two unconfigured devices previously shared
+  `default-home`, so discovery treated each other's announcements as "self" and
+  ignored them — they were mutually invisible and could not onboard. The default
+  config/init now ship an empty `home_id` to trigger derivation.
+- **Default Home wireless profile.** A Home with no profile brought up no
+  wireless and pushed nothing to a joining node. `meshd` now seeds a default
+  profile at startup — an 802.11s mesh (and a client AP derived from it) with a
+  mesh SSID (`MESHD_MESH_SSID`, else a unique `OMM-<home-suffix>`) and key
+  (`MESHD_MESH_KEY`, else a generated random passphrase persisted in the
+  profile). A wizard/operator-set profile is never overwritten.
+- **Controller-side adoption policy.** Replaces the blanket auto-adopt boolean
+  with `adopt_policy` (`MESHD_ADOPT_POLICY`): `off` (operator approves, default),
+  `onlink` (auto-adopt only nodes whose enrollment arrives on the controller's
+  own LAN subnet — verified from the request source), or `always` (any node).
+  Adoption is the controller's decision, gated on a signal it can verify, never
+  on the node's self-declared backhaul. Legacy `MESHD_AUTO_ADOPT=1` maps to
+  `always`.
+- **802.11s → wired multi-AP auto-fallback.** When the mesh interface does not
+  come up (typically: no mesh-capable `wpad`), the node now degrades to a wired
+  multi-AP instead of having no backhaul: it removes the mesh interface for a
+  clean AP-only re-setup and records the outcome. Surfaced as a `backhaul`
+  object on `GET /status` (`{mode, reason, remediation}`) and a per-node
+  `mesh_mode` on the topology graph; the LuCI app shows the mode, a degrade
+  notice with the `wpad-mesh` remediation, and marks degraded nodes.
+- **Lifecycle-managed network posture.** Opt-in (`MESHD_MANAGE_NETWORK`, default
+  off): an unclaimed node takes a **Guest** dumb-AP posture — its wired uplink
+  (auto-detected from `network.wan.device`, so any jack works) bridged into
+  `br-lan`, `lan` as a DHCP client, the routed `wan` disabled, authoritative DHCP
+  stood down — so it is L2-adjacent to a controller and can actually receive
+  discovery broadcasts (a routed, firewalled `wan` silently drops them). It
+  returns to a gateway posture once it controls its Home. See
+  [doc/network-posture.md](doc/network-posture.md). New `internal/netposture`.
+- **Per-device build + deploy tooling.** `scripts/build-devices.sh`
+  cross-compiles for the test boards (verifying the binary's ELF arch so a
+  wrong-arch build can't ship), and `scripts/deploy.sh` deploys the package
+  (binary + init, fresh config on `--reset`) to a live device over SSH with
+  `--set`/`--join`/`--watch`.
+
+### Fixed
+- **Controller announce failed on a segment with no default route.** Announce
+  dialed a connected socket to the limited broadcast `255.255.255.255`, which
+  needs a route a gateway-less segment lacks (`network is unreachable`), so the
+  controller never announced. It now sends over a `SO_BROADCAST` socket to each
+  interface's subnet-directed broadcast, which routes over the connected subnet.
+- **`enroll/join` aborted with "context canceled" via LuCI.** The rpcd plugin
+  reaches `meshd` over busybox `nc`, which half-closes after writing the request;
+  `meshd` then cancelled the request context mid-handshake. The join now runs on
+  a fresh, bounded context detached from the request.
+- **Unattended wired onboard could never fire.** An unclaimed wired node
+  self-selected its own Home at boot, before discovery surfaced a controller,
+  which blocked auto-onboard. It now defers self-selection: the onboard loop
+  enrolls into a discovered controller first and only becomes its own controller
+  after a grace window (`MESHD_ONBOARD_GRACE`, default `20s`) with none found.
+
 ## [0.3.0] - 2026-06-07
 
 ### Added
@@ -184,7 +245,8 @@ control plane, a native LuCI app, and signed opkg **and** apk package feeds.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/and-elf/omm/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/and-elf/omm/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/and-elf/omm/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/and-elf/omm/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/and-elf/omm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/and-elf/omm/compare/v0.0.1...v0.1.0
