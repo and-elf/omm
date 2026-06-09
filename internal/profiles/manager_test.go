@@ -367,6 +367,22 @@ func TestApplyProfileNoMeshRecordsMultiAPWithoutReason(t *testing.T) {
 	}
 }
 
+func TestDefaultProfile(t *testing.T) {
+	// Derives a unique SSID from the home id and carries the supplied key; the
+	// AP is left to ApplyProfile to derive from the mesh SSID/key.
+	p := DefaultProfile("home-edb61002a448", "", "secretkey123")
+	if p.HomeID != "home-edb61002a448" || p.MeshSSID != "OMM-edb610" || p.MeshKey != "secretkey123" {
+		t.Fatalf("unexpected default profile: %+v", p)
+	}
+	if p.NodeName != "" {
+		t.Fatalf("default profile must not set NodeName (would rename device): %q", p.NodeName)
+	}
+	// An explicit SSID wins.
+	if got := DefaultProfile("home-x", "MyHome", "k").MeshSSID; got != "MyHome" {
+		t.Fatalf("explicit SSID = %q, want MyHome", got)
+	}
+}
+
 func contains(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {

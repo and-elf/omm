@@ -17,6 +17,17 @@ When a Home becomes active, `ApplyProfile` authors two interfaces and attaches
 them to the existing `lan` so meshed nodes and AP clients share the controller's
 LAN and its DHCP:
 
+### Default profile
+
+A Home with no profile yet would bring up no wireless and push nothing to a
+joining node (`apply profile … not found`). So when a daemon's own Home has no
+profile, meshd **seeds a default one** at startup: an 802.11s mesh (and the
+client AP derived from it) with a mesh SSID — `MESHD_MESH_SSID`, else a unique
+`OMM-<home-suffix>` — and key — `MESHD_MESH_KEY`, else a generated random
+passphrase persisted in the profile. This makes a freshly-created Home come up
+with working, closed-by-default wireless and hand it to nodes on enrollment,
+with no wizard. A wizard/operator-set profile is never overwritten.
+
 The radio is chosen by, in order of precedence:
 
 1. `radio` — an explicit OpenWrt wifi-device name (advanced override).

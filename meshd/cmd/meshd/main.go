@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -111,6 +114,24 @@ func main() {
 				log.Printf("failed to update home: %v", err)
 			}
 		}
+	}
+
+	// Seed a default wireless profile when the Home has none, so the controller's
+	// own wireless comes up and a joining node receives wifi config — without the
+	// setup wizard. An operator/wizard-set profile is never overwritten.
+	if _, err := store.GetProfile(ctx, cfg.HomeID); errors.Is(err, storage.ErrNotFound) {
+		key := cfg.MeshKey
+		if key == "" {
+			key = generateMeshKey()
+		}
+		prof := profiles.DefaultProfile(cfg.HomeID, cfg.MeshSSID, key)
+		if err := store.CreateOrUpdateProfile(ctx, prof); err != nil {
+			log.Printf("failed to seed default profile: %v", err)
+		} else {
+			log.Printf("seeded default wireless profile for %s (ssid=%s)", cfg.HomeID, prof.MeshSSID)
+		}
+	} else if err != nil {
+		log.Printf("check home profile: %v", err)
 	}
 
 	profileManager := profiles.NewManager(store, uciClient, profiles.Config{
@@ -389,6 +410,20 @@ func (s storeMeshMode) MeshMode(ctx context.Context) string {
 	return state.Mode
 }
 
+// generateMeshKey returns a random WPA/SAE passphrase (32 hex chars, within the
+// 8–63 range) for a Home's default mesh key when none is configured. It is
+// persisted in the seeded profile and pushed to nodes on join, so the mesh is
+// closed by default rather than open.
+func generateMeshKey() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failing is unexpected; a fixed fallback still beats an open
+		// mesh and is overridable via MESHD_MESH_KEY / the wizard.
+		return "ommmeshchangeme0"
+	}
+	return hex.EncodeToString(b)
+}
+
 // resolveBSSID returns this controller's mesh BSSID: the explicit MESHD_BSSID,
 // or the MAC read from MESHD_MESH_IFACE (/sys/class/net/<iface>/address).
 func resolveBSSID(cfg config.Config) string {
@@ -513,6 +548,11 @@ func autoOnboardWired(ctx context.Context, store storage.Store, collector *topol
 			}
 		}
 		if result.Profile != nil {
+			// Persist the received profile so a later auto-select / reboot can
+			// re-apply it, then apply it now.
+			if serr := store.CreateOrUpdateProfile(ctx, *result.Profile); serr != nil {
+				log.Printf("auto-onboard: store profile from %s failed (non-fatal): %v", controllerURL, serr)
+			}
 			if perr := pm.ApplyProfile(ctx, *result.Profile); perr != nil {
 				log.Printf("auto-onboard: apply profile from %s failed (non-fatal): %v", controllerURL, perr)
 			}
@@ -576,6 +616,10 @@ func joinHome(ctx context.Context, id *identity.Identity, serial, controllerURL 
 				}
 			}
 			if result.Profile != nil {
+				// Persist so a later auto-select / reboot re-applies it.
+				if serr := store.CreateOrUpdateProfile(ctx, *result.Profile); serr != nil {
+					log.Printf("store profile from %s failed: %v", controllerURL, serr)
+				}
 				if err := pm.ApplyProfile(ctx, *result.Profile); err != nil {
 					log.Printf("apply profile from %s failed: %v", controllerURL, err)
 				}

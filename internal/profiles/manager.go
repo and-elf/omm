@@ -4,11 +4,38 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/storage"
 	"github.com/and-elf/omm/internal/uci"
 )
+
+// DefaultProfile is the zero-config wireless profile for a freshly-created Home:
+// an 802.11s mesh (and a client AP, which ApplyProfile derives from the same
+// SSID/key) so the Home has working wireless — and pushes it to nodes that join
+// — without the setup wizard. ssid falls back to a unique name derived from the
+// Home id; an empty key leaves the mesh open (callers should supply a generated
+// one). NodeName is left empty so applying it never renames the device.
+func DefaultProfile(homeID, ssid, key string) models.Profile {
+	if ssid == "" {
+		ssid = "OMM-" + homeSuffix(homeID)
+	}
+	return models.Profile{HomeID: homeID, MeshSSID: ssid, MeshKey: key}
+}
+
+// homeSuffix is a short, stable tag from a Home id for a default SSID, e.g.
+// "home-edb61002a448" -> "edb610".
+func homeSuffix(homeID string) string {
+	s := strings.TrimPrefix(homeID, "home-")
+	if len(s) > 6 {
+		s = s[:6]
+	}
+	if s == "" {
+		return "mesh"
+	}
+	return s
+}
 
 // degradeReason / degradeRemediation explain a 802.11s -> multi-AP fallback to
 // the operator (surfaced via /status and the LuCI app).

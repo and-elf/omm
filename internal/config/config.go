@@ -26,6 +26,12 @@ type Config struct {
 	HomeID       string
 	HomeName     string
 	ControllerID string
+	// Default wireless for this daemon's Home, used to seed a profile when the
+	// Home has none yet (so onboarding pushes wifi without the wizard). Empty
+	// MeshSSID derives a unique name from the Home id; empty MeshKey generates a
+	// random one (persisted in the profile).
+	MeshSSID     string
+	MeshKey      string
 	AutoAdopt    bool
 	APIAdvertise string // API URL announced to clients (defaults to HTTPAddr)
 	UDPBroadcast string // broadcast endpoint for announcements
@@ -122,6 +128,8 @@ func Load() Config {
 		HomeID:       os.Getenv("MESHD_HOME_ID"),
 		HomeName:     envOr("MESHD_HOME_NAME", "Home"),
 		ControllerID: envOr("MESHD_CONTROLLER_ID", "gw01"),
+		MeshSSID:     os.Getenv("MESHD_MESH_SSID"),
+		MeshKey:      os.Getenv("MESHD_MESH_KEY"),
 		AutoAdopt:    envBool("MESHD_AUTO_ADOPT"),
 		APIAdvertise: os.Getenv("MESHD_API_ADVERTISE"),
 		UDPBroadcast: envOr("MESHD_UDP_BROADCAST", "255.255.255.255:45678"),
