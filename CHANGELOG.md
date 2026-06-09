@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   node joins it. Set `adopt_policy=off` / `auto_onboard_wired=0` to require the
   wizard. Network posture management (`manage_network`) stays opt-in.
 
+### Fixed
+- **802.11s mesh wrongly degraded to multi-AP even with a mesh-capable `wpad`.**
+  Two causes, found on a live IPQ board: the first-boot setup AP lingered on the
+  radio, so applying the mesh made it AP+AP+mesh on one radio (driver rejects it,
+  `nl80211 -95`) — meshd now retires the setup AP when a home activates, before
+  applying the profile; and the mesh-up check ran immediately after the wireless
+  reload, before the mesh vif had instantiated — it now polls for a few seconds
+  before concluding the mesh failed.
+
 ### Added
 - **Mesh-capable `wpad` provisioning.** So 802.11s actually forms (instead of
   degrading to wired multi-AP): documented baking `wpad-mesh-*` into the firmware
