@@ -30,16 +30,18 @@ build=1
 swap=1
 reset=0
 watch=0
+wpad_mesh=0
 join_url=""
 sets=()
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--set) sets+=("$2"); shift 2 ;;
 	--no-build) build=0; shift ;;
-	--no-swap) swap=0; build=0; shift ;; # skip building/swapping the binary
-	--reset) reset=1; shift ;;           # wipe meshd state (DB) for a clean run
-	--watch) watch="$2"; shift 2 ;;      # tail meshd log for N seconds at the end
-	--join) join_url="$2"; shift 2 ;;    # after deploy, enroll into this controller
+	--no-swap) swap=0; build=0; shift ;;       # skip building/swapping the binary
+	--reset) reset=1; shift ;;                 # wipe meshd state (DB) for a clean run
+	--watch) watch="$2"; shift 2 ;;            # tail meshd log for N seconds at the end
+	--join) join_url="$2"; shift 2 ;;          # after deploy, enroll into this controller
+	--install-wpad-mesh) wpad_mesh=1; shift ;; # swap wpad-basic-* -> wpad-mesh-* so 802.11s forms
 	*) echo "unknown argument: $1" >&2; exit 1 ;;
 	esac
 done
@@ -99,9 +101,34 @@ for kv in "${sets[@]:-}"; do
 	applied_sets=1
 done
 
+# Ensure a mesh-capable wpad so 802.11s can form (the stock wpad-basic-* can't).
+# Done before the restart so meshd re-applies the mesh profile with it present.
+# Online-only and idempotent; detects the installed crypto variant so it matches
+# the image (mbedtls/wolfssl/openssl).
+if [ "$wpad_mesh" = 1 ]; then
+	echo "==> ensuring mesh-capable wpad (802.11s)"
+	ssh_ 'sh -s' <<'REMOTE'
+set -e
+inst() { opkg list-installed 2>/dev/null; }
+if inst | grep -qE '^wpad-(mesh|wolfssl|openssl|mbedtls) '; then
+	echo "wpad already mesh-capable: $(inst | grep -oE 'wpad[^ ]*' | head -1)"; exit 0
+fi
+cur=$(inst | grep -oE 'wpad-basic-(mbedtls|wolfssl|openssl)' | head -1)
+[ -n "$cur" ] || { echo "no wpad-basic-* found; install a wpad-mesh-* manually"; exit 0; }
+crypto=${cur##*-}
+echo "swapping $cur -> wpad-mesh-$crypto"
+opkg update
+# Replace the conflicting basic variant: remove then install (brief wpad gap;
+# wifi reconfigures on the meshd restart that follows).
+opkg remove "$cur" >/dev/null 2>&1 || true
+opkg install "wpad-mesh-$crypto"
+echo "installed: $(inst | grep -oE 'wpad[^ ]*' | head -1)"
+REMOTE
+fi
+
 # Restart when the binary changed, state was reset, or config changed; a
 # join-only run doesn't.
-if [ "$swap" = 1 ] || [ "$reset" = 1 ] || [ "$applied_sets" = 1 ]; then
+if [ "$swap" = 1 ] || [ "$reset" = 1 ] || [ "$applied_sets" = 1 ] || [ "$wpad_mesh" = 1 ]; then
 	echo "==> (re)starting meshd"
 	ssh_ '/etc/init.d/meshd restart; sleep 2; logread -e meshd | tail -4'
 fi

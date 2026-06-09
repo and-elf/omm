@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Zero-touch defaults.** A fresh kit now self-forms with no configuration: the
+  controller's `adopt_policy` defaults to `onlink` (auto-adopt only nodes
+  verified to be on its own LAN) and a node's `auto_onboard_wired` defaults to on
+  (with `backhaul_iface` defaulting to `br-lan` so the wired backhaul is
+  classified), so powering the first device makes it a controller and cabling a
+  node joins it. Set `adopt_policy=off` / `auto_onboard_wired=0` to require the
+  wizard. Network posture management (`manage_network`) stays opt-in.
+
+### Added
+- **Mesh-capable `wpad` provisioning.** So 802.11s actually forms (instead of
+  degrading to wired multi-AP): documented baking `wpad-mesh-*` into the firmware
+  image — the reliable path that also covers offline nodes — and added
+  `scripts/deploy.sh --install-wpad-mesh`, which detects a live device's crypto
+  variant and swaps `wpad-basic-*` for the matching `wpad-mesh-*`.
+
 ## [0.3.0] - 2026-06-07
 
 ### Added

@@ -55,20 +55,36 @@ a mesh node requires a **mesh-capable `wpad`**:
 | `wpad-mesh-mbedtls` / `wpad-mesh-wolfssl` / `wpad-mesh-openssl` | **Yes** | Adds 802.11s + SAE. Pick the variant matching your image's crypto backend. |
 | `wpad-wolfssl` / `wpad-openssl` (full) | **Yes** | Everything, incl. mesh and WPA-Enterprise. |
 
-Install one on each mesh node (it replaces the basic variant):
+Get a mesh-capable `wpad` onto each mesh device one of three ways:
 
-```sh
-opkg update
-opkg install wpad-mesh-wolfssl    # or -mbedtls to match a stock 23.05 image
-# multi-hop chaining + topology (batctl) — optional, see network-model.md:
-# opkg install kmod-batman-adv batctl
-```
+- **Bake it into the firmware image (recommended for a fleet / offline nodes).**
+  Add it to the image so every device — including nodes with no internet until
+  they join — has it from first boot. With the image builder:
 
-> **Why this isn't a hard package dependency.** All `wpad`/`hostapd`/
+  ```sh
+  make image PROFILE=<board> \
+    PACKAGES="meshd luci-app-meshd -wpad-basic-mbedtls wpad-mesh-mbedtls"
+  ```
+  (Match your image's crypto backend: `-mbedtls`/`-wolfssl`/`-openssl`. The
+  leading `-` drops the default basic variant it conflicts with.) Optional for
+  multi-hop/topology: add `kmod-batman-adv batctl`.
+
+- **On a live device** (online — e.g. a controller, or a node after it has
+  joined the home LAN): `scripts/deploy.sh <host> --install-wpad-mesh` detects
+  the installed crypto variant and swaps `wpad-basic-*` for the matching
+  `wpad-mesh-*`. Or by hand:
+
+  ```sh
+  opkg update
+  opkg remove wpad-basic-mbedtls && opkg install wpad-mesh-mbedtls   # match your crypto
+  ```
+
+> **Why it isn't a hard package dependency.** All `wpad`/`hostapd`/
 > `wpa-supplicant` variants `PROVIDES: wpad` and conflict with one another, so a
-> `DEPENDS: +wpad-mesh-*` would force-swap whatever the image shipped and break
-> on a different crypto backend. The requirement is therefore **documented**
-> (this section) rather than hard-pinned, matching `mesh11sd`'s approach.
+> `DEPENDS: +wpad-mesh-*` would force-swap whatever the image shipped, break on a
+> different crypto backend, and pull `wpad` onto radio-less wired controllers
+> that don't need it. So it is **documented** (and the image-builder line above
+> makes it explicit) rather than hard-pinned, matching `mesh11sd`'s approach.
 
 **Without** a mesh-capable `wpad`, the `omm_mesh` interface cannot start and the
 node degrades to the wired multi-AP tier (`omm_ap` on `lan`) — see

@@ -34,7 +34,8 @@ type Config struct {
 	MeshKey  string
 	// AdoptPolicy gates unattended adoption on the controller: "off" (operator
 	// approves), "onlink" (auto-adopt only nodes enrolling from this controller's
-	// LAN), or "always" (any node). Default off.
+	// LAN), or "always" (any node). Default "onlink" — safe (trust is the
+	// verifiable on-link source) and enables zero-touch within a home.
 	AdoptPolicy  string
 	APIAdvertise string // API URL announced to clients (defaults to HTTPAddr)
 	UDPBroadcast string // broadcast endpoint for announcements
@@ -48,10 +49,9 @@ type Config struct {
 
 	// AutoOnboardWired lets an unclaimed node that is on the wire (ethernet
 	// backhaul) enroll into a discovered controller unattended, with no wizard.
-	// Opt-in (default false): a node on an untrusted LAN should not silently
-	// join any controller that happens to be announcing. Requires BackhaulIface
-	// to be set, and the controller to auto-adopt for the join to complete
-	// without an operator approving it.
+	// Default true (zero-touch): a fresh wired node joins a home it finds, and
+	// becomes its own controller if it finds none (grace fallback). Set false to
+	// require the wizard. Adoption is still gated by the controller's AdoptPolicy.
 	AutoOnboardWired bool
 
 	// OnboardGrace is how long an unclaimed wired node lets discovery +
@@ -63,7 +63,7 @@ type Config struct {
 	// Topology collection.
 	BatmanIface   string   // batman-adv interface (e.g. bat0)
 	APInterfaces  []string // hostapd interfaces to read clients from
-	BackhaulIface string   // ethernet uplink interface used to classify backhaul (e.g. eth0); empty => unknown
+	BackhaulIface string   // iface whose carrier classifies backhaul (default "br-lan"; e.g. eth0/wan); empty => unknown
 
 	// Network posture: meshd manages network/dhcp/firewall by lifecycle state
 	// (unclaimed -> Guest dumb-AP so discovery works; claimed controller ->
@@ -142,12 +142,12 @@ func Load() Config {
 		IdentityDir:      envOr("MESHD_IDENTITY_DIR", "./meshd-identity"),
 		Serial:           envOr("MESHD_SERIAL", hostnameOr("unknown")),
 		Join:             splitList(os.Getenv("MESHD_JOIN")),
-		AutoOnboardWired: envBool("MESHD_AUTO_ONBOARD_WIRED"),
+		AutoOnboardWired: envBoolOr("MESHD_AUTO_ONBOARD_WIRED", true),
 		OnboardGrace:     envDurationOr("MESHD_ONBOARD_GRACE", 20*time.Second),
 
 		BatmanIface:   envOr("MESHD_BATMAN_IFACE", "bat0"),
 		APInterfaces:  splitList(os.Getenv("MESHD_AP_IFACES")),
-		BackhaulIface: os.Getenv("MESHD_BACKHAUL_IFACE"),
+		BackhaulIface: envOr("MESHD_BACKHAUL_IFACE", "br-lan"),
 
 		ManageNetwork: envBool("MESHD_MANAGE_NETWORK"),
 		UplinkPort:    os.Getenv("MESHD_UPLINK_PORT"),
@@ -165,7 +165,7 @@ func Load() Config {
 }
 
 // adoptPolicyEnv resolves the adopt policy: MESHD_ADOPT_POLICY wins; otherwise
-// the legacy MESHD_AUTO_ADOPT boolean maps to "always"; default "off".
+// the legacy MESHD_AUTO_ADOPT boolean maps to "always"; default "onlink".
 func adoptPolicyEnv() string {
 	if p := os.Getenv("MESHD_ADOPT_POLICY"); p != "" {
 		return p
@@ -173,7 +173,7 @@ func adoptPolicyEnv() string {
 	if envBool("MESHD_AUTO_ADOPT") {
 		return "always"
 	}
-	return "off"
+	return "onlink"
 }
 
 // envDurationOr parses a Go duration string (e.g. "20s", "1m") from key,
