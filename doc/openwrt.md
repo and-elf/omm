@@ -40,6 +40,42 @@ Configuration (UCI `meshd.main`, mapped to env):
 The discovery announcement carries the **mesh-facing** address, so joining nodes
 reach the control plane regardless of mode.
 
+## Wireless backhaul requirements (802.11s)
+
+OMM forms its wireless backhaul with **802.11s** (`mode 'mesh'`, SAE), authored
+on the `omm_mesh` interface (see [Profiles](profiles.md) and the two-tier
+[Backhaul & Mesh Model](network-model.md#backhaul--mesh-model)). 802.11s mesh
+mode is **not** supported by the `wpad` variant that ships in stock OpenWrt
+images, so — like [`mesh11sd`](https://github.com/openwrt/packages/tree/master/net/mesh11sd) —
+a mesh node requires a **mesh-capable `wpad`**:
+
+| `wpad` variant | 802.11s mesh? | Notes |
+|----------------|---------------|-------|
+| `wpad-basic-mbedtls` / `wpad-basic-wolfssl` | **No** | Default in images (23.05 / 22.03). AP+STA+SAE, but no mesh. |
+| `wpad-mesh-mbedtls` / `wpad-mesh-wolfssl` / `wpad-mesh-openssl` | **Yes** | Adds 802.11s + SAE. Pick the variant matching your image's crypto backend. |
+| `wpad-wolfssl` / `wpad-openssl` (full) | **Yes** | Everything, incl. mesh and WPA-Enterprise. |
+
+Install one on each mesh node (it replaces the basic variant):
+
+```sh
+opkg update
+opkg install wpad-mesh-wolfssl    # or -mbedtls to match a stock 23.05 image
+# multi-hop chaining + topology (batctl) — optional, see network-model.md:
+# opkg install kmod-batman-adv batctl
+```
+
+> **Why this isn't a hard package dependency.** All `wpad`/`hostapd`/
+> `wpa-supplicant` variants `PROVIDES: wpad` and conflict with one another, so a
+> `DEPENDS: +wpad-mesh-*` would force-swap whatever the image shipped and break
+> on a different crypto backend. The requirement is therefore **documented**
+> (this section) rather than hard-pinned, matching `mesh11sd`'s approach.
+
+**Without** a mesh-capable `wpad`, the `omm_mesh` interface cannot start and the
+node degrades to the wired multi-AP tier (`omm_ap` on `lan`) — see
+[Tier 2](network-model.md#tier-2--wired-multi-ap-degraded). A node reached only
+over the air (e.g. a detached garage AP) therefore **requires** a mesh-capable
+`wpad`.
+
 ## Status LED
 
 meshd drives a single status LED from the node's onboarding state so an
