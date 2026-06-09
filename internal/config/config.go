@@ -165,13 +165,18 @@ func Load() Config {
 }
 
 // adoptPolicyEnv resolves the adopt policy: MESHD_ADOPT_POLICY wins; otherwise
-// the legacy MESHD_AUTO_ADOPT boolean maps to "always"; default "onlink".
+// the legacy MESHD_AUTO_ADOPT, when explicitly set, is authoritative (on ->
+// "always", off -> "off"); only when neither is set do we fall back to the
+// zero-touch default "onlink".
 func adoptPolicyEnv() string {
 	if p := os.Getenv("MESHD_ADOPT_POLICY"); p != "" {
 		return p
 	}
-	if envBool("MESHD_AUTO_ADOPT") {
-		return "always"
+	if v, ok := os.LookupEnv("MESHD_AUTO_ADOPT"); ok && v != "" {
+		if envBool("MESHD_AUTO_ADOPT") {
+			return "always"
+		}
+		return "off"
 	}
 	return "onlink"
 }

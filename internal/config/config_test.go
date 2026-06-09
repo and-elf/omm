@@ -10,6 +10,27 @@ func clearAddrEnv(t *testing.T) {
 	}
 }
 
+// The adopt policy defaults to onlink (zero-touch), MESHD_ADOPT_POLICY wins, and
+// the legacy MESHD_AUTO_ADOPT is honored both ways when explicitly set —
+// notably AUTO_ADOPT=0 must mean "off", not the new onlink default.
+func TestAdoptPolicyResolution(t *testing.T) {
+	cases := []struct{ policy, auto, want string }{
+		{"", "", "onlink"},       // unset -> zero-touch default
+		{"always", "", "always"}, // explicit policy wins
+		{"off", "1", "off"},      // explicit policy wins over legacy
+		{"", "1", "always"},      // legacy on -> always
+		{"", "0", "off"},         // legacy explicit off -> off (regression guard)
+		{"", "true", "always"},
+	}
+	for _, c := range cases {
+		t.Setenv("MESHD_ADOPT_POLICY", c.policy)
+		t.Setenv("MESHD_AUTO_ADOPT", c.auto)
+		if got := Load().AdoptPolicy; got != c.want {
+			t.Fatalf("policy=%q auto=%q => %q, want %q", c.policy, c.auto, got, c.want)
+		}
+	}
+}
+
 func TestDeriveHomeID(t *testing.T) {
 	// Stable: derived from the node id's prefix.
 	if got := DeriveHomeID("a7cf0e35468faaf6cf7b8d202c0d2d13"); got != "home-a7cf0e35468f" {

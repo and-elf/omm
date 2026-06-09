@@ -65,7 +65,7 @@ done
 # meshd's boot brings the setup AP online.
 /sbin/rpcd & sleep 1
 exec env \
-	MESHD_HTTP_ADDR=0.0.0.0:8080 MESHD_AUTO_ADOPT=0 \
+	MESHD_HTTP_ADDR=0.0.0.0:8080 MESHD_AUTO_ADOPT=0 MESHD_AUTO_ONBOARD_WIRED=0 \
 	MESHD_HOME_ID=home-setup MESHD_SERIAL=setup-dev \
 	MESHD_DATABASE_PATH=/tmp/m.bolt MESHD_IDENTITY_DIR=/tmp/id \
 	MESHD_UBUS_SOCKET=/var/run/ubus/ubus.sock \

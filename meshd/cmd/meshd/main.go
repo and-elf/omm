@@ -312,7 +312,18 @@ func main() {
 			log.Printf("retire setup AP failed (non-fatal): %v", err)
 		}
 	}
+	// autoSelect activates a known Home and applies it WITHOUT retiring the setup
+	// AP — used for re-selection after a join and for the manual path, where the
+	// device keeps its first-boot setup AP until real setup completes.
 	autoSelect := func() {
+		autoSelectHome(ctx, store, profileManager, wifiClients, cfg.HomeID, nil)
+		applyPosture(ctx)
+	}
+	// becomeOwnController is the zero-touch fallback: it retires the setup AP
+	// (freeing the radio vif for the mesh and marking the device claimed) before
+	// selecting+applying its own Home, so an unattended device that finds no
+	// controller comes up as a working controller with its 802.11s mesh.
+	becomeOwnController := func() {
 		autoSelectHome(ctx, store, profileManager, wifiClients, cfg.HomeID, retireSetupAP)
 		applyPosture(ctx)
 	}
@@ -322,9 +333,9 @@ func main() {
 			// Wired auto-onboard: an unclaimed node on the wire enrolls into a
 			// discovered controller unattended. Do NOT self-select here — that
 			// would claim this node's own Home and block onboarding; the onboard
-			// loop instead tries to enroll first and only falls back to
-			// self-selection (autoSelect) after a grace window with no controller.
-			go autoOnboardWired(ctx, store, collector, discoCache, id, profileManager, cfg, completeSetupLocal, autoSelect)
+			// loop tries to enroll first and only falls back (becomeOwnController)
+			// after a grace window with no controller.
+			go autoOnboardWired(ctx, store, collector, discoCache, id, profileManager, cfg, completeSetupLocal, autoSelect, becomeOwnController)
 		} else {
 			// No auto-onboard: select from the Homes already known (own, last-resort).
 			go autoSelect()
@@ -552,7 +563,7 @@ func reportTopologyLoop(ctx context.Context, collector *topology.Collector, node
 // wire enrolls into a discovered controller unattended. The decision policy
 // lives in the onboard package (tested there); this wires it to the daemon's
 // store, backhaul detection, discovery cache and join flow.
-func autoOnboardWired(ctx context.Context, store storage.Store, collector *topology.Collector, disco *discovery.Cache, id *identity.Identity, pm profiles.ProfileManager, cfg config.Config, completeSetup func(context.Context) error, afterJoin func()) {
+func autoOnboardWired(ctx context.Context, store storage.Store, collector *topology.Collector, disco *discovery.Cache, id *identity.Identity, pm profiles.ProfileManager, cfg config.Config, completeSetup func(context.Context) error, afterJoin, fallback func()) {
 	backhaul := topology.SysfsBackhaul{Iface: cfg.BackhaulIface}
 	clients := &controllerClients{}
 
@@ -607,7 +618,7 @@ func autoOnboardWired(ctx context.Context, store storage.Store, collector *topol
 		Backhaul:      backhaul.Backhaul,
 		// After the grace window with no controller in reach, fall back to
 		// selecting this node's own Home (become its own controller).
-		Fallback: func(ctx context.Context) { afterJoin() },
+		Fallback: func(ctx context.Context) { fallback() },
 		Discover: func() []discovery.Announcement {
 			// Answer from the passively-maintained cache, dropping this device's
 			// own Home (Decide also filters it, defensively).
