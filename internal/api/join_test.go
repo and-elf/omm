@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -61,6 +62,50 @@ func TestJoinEndpointEnrollsIntoAnotherController(t *testing.T) {
 	}
 	if joined.ID != "home-controller" {
 		t.Fatalf("unexpected recorded home: %+v", joined)
+	}
+}
+
+// A join must survive the request context being cancelled mid-flight — the LuCI
+// rpcd/busybox-nc transport half-closes the socket after writing the request,
+// cancelling r's context. enrollJoin detaches the handshake onto a fresh
+// context, so the enrollment still completes. Before that fix this returned
+// "context canceled" (502).
+func TestJoinSurvivesCanceledRequestContext(t *testing.T) {
+	cdb, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { cdb.Close() })
+	cstore := storage.NewStore(cdb)
+	if err := cstore.CreateHome(context.Background(), models.Home{ID: "home-controller", Name: "Controller Home", Controller: "ctrl-mac"}); err != nil {
+		t.Fatalf("seed controller home: %v", err)
+	}
+	csvc := enrollment.NewService(cstore, enrollment.Options{HomeID: "home-controller", AutoAdopt: true})
+	controllerSrv := httptest.NewServer(NewRouter(cstore, noopProfileManager{}, WithEnrollment(csvc)))
+	t.Cleanup(controllerSrv.Close)
+
+	id, _ := identity.Generate()
+	ddb, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { ddb.Close() })
+	dstore := storage.NewStore(ddb)
+	dsvc := enrollment.NewService(dstore, enrollment.Options{HomeID: "home-device", AutoAdopt: true})
+	deviceRouter := NewRouter(dstore, noopProfileManager{}, WithEnrollment(dsvc), WithSelf(id, "device-serial"))
+
+	body := &bytes.Buffer{}
+	_ = json.NewEncoder(body).Encode(joinInput{ControllerURL: controllerSrv.URL})
+	// Cancel the request context up front, exactly as the nc half-close does.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPost, "/enroll/join", body).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+
+	deviceRouter.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("join with cancelled request ctx: expected 200, got %d (%s)", rw.Code, rw.Body)
+	}
+	var res enrollment.Result
+	_ = json.Unmarshal(rw.Body.Bytes(), &res)
+	if res.Status != models.EnrollmentActive {
+		t.Fatalf("expected active, got %q", res.Status)
 	}
 }
 

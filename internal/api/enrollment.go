@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -12,6 +14,12 @@ import (
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/storage"
 )
+
+// joinTimeout bounds the enrollment handshake when driven through the API. It
+// must stay under rpcd/ubus's request timeout (~30s) so the LuCI call gets a
+// real result rather than a transport timeout; auto-adopt completes in well
+// under this.
+const joinTimeout = 25 * time.Second
 
 func (h *apiHandler) enrollRequest(w http.ResponseWriter, r *http.Request) {
 	var in enrollment.RequestInput
@@ -143,7 +151,14 @@ func (h *apiHandler) enrollJoin(w http.ResponseWriter, r *http.Request) {
 		serial = h.selfSerial
 	}
 
-	result, err := client.JoinAndRecord(r.Context(), h.self, in.ControllerURL, serial, h.store, client.Options{})
+	// Detach from the request context. The LuCI rpcd plugin reaches meshd over
+	// busybox nc, which half-closes the socket after writing the request — that
+	// cancels r's context, which would abort the outbound enrollment handshake
+	// mid-flight ("context canceled"). Run the join on a fresh, bounded context.
+	joinCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), joinTimeout)
+	defer cancel()
+
+	result, err := client.JoinAndRecord(joinCtx, h.self, in.ControllerURL, serial, h.store, client.Options{})
 	if err != nil {
 		respondError(w, http.StatusBadGateway, err)
 		return
