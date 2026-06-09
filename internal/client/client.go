@@ -141,6 +141,35 @@ func JoinAndRecord(ctx context.Context, id *identity.Identity, controllerURL, se
 
 // ReportTopology pushes a node's local topology graph to a controller for
 // mesh-wide aggregation (POST /topology/report).
+// FetchProfile fetches a Home's current profile from its controller over the
+// (authenticated) mesh transport, so a node can pull profile updates after it
+// has joined — letting an SSID/key edit on the controller propagate.
+func FetchProfile(ctx context.Context, controllerURL, homeID string, httpClient *http.Client) (models.Profile, error) {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		strings.TrimRight(controllerURL, "/")+"/homes/"+url.PathEscape(homeID)+"/profile", nil)
+	if err != nil {
+		return models.Profile{}, err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return models.Profile{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return models.Profile{}, fmt.Errorf("fetch profile: status %d", resp.StatusCode)
+	}
+	var out struct {
+		Profile models.Profile `json:"profile"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return models.Profile{}, err
+	}
+	return out.Profile, nil
+}
+
 func ReportTopology(ctx context.Context, controllerURL, nodeID string, graph topology.Graph, httpClient *http.Client) error {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}

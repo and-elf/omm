@@ -80,6 +80,34 @@ func TestClientEnrollWaitsForManualAdoption(t *testing.T) {
 	}
 }
 
+func TestFetchProfile(t *testing.T) {
+	srv, store, _ := newServer(t, false)
+	ctx := context.Background()
+
+	if err := store.CreateHome(ctx, models.Home{ID: "home-1", Name: "Home One"}); err != nil {
+		t.Fatalf("create home: %v", err)
+	}
+	want := models.Profile{HomeID: "home-1", MeshSSID: "casa", MeshKey: "supersecret"}
+	if err := store.CreateOrUpdateProfile(ctx, want); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	got, err := client.FetchProfile(ctx, srv.URL, "home-1", nil)
+	if err != nil {
+		t.Fatalf("fetch profile: %v", err)
+	}
+	if got.MeshSSID != want.MeshSSID || got.MeshKey != want.MeshKey {
+		t.Fatalf("fetched profile = %+v, want ssid/key %q/%q", got, want.MeshSSID, want.MeshKey)
+	}
+}
+
+func TestFetchProfileUnknownHome(t *testing.T) {
+	srv, _, _ := newServer(t, false)
+	if _, err := client.FetchProfile(context.Background(), srv.URL, "no-such-home", nil); err == nil {
+		t.Fatal("expected error fetching profile for unknown home")
+	}
+}
+
 func TestClientEnrollFailsAgainstWrongURL(t *testing.T) {
 	id, _ := identity.Generate()
 	c := client.New(id, "http://127.0.0.1:1", client.Options{PollInterval: 10 * time.Millisecond})

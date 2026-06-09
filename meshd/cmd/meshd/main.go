@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -352,6 +353,8 @@ func main() {
 		// Push this node's local topology to its controllers for mesh-wide
 		// aggregation.
 		go reportTopologyLoop(ctx, collector, id.NodeID(), cfg.Join, meshClients, 15*time.Second)
+		// Pull profile updates from the joined controller(s) and re-apply on change.
+		go syncProfileLoop(ctx, cfg.Join, meshClients, store, profileManager, 30*time.Second)
 	}
 
 	// Bring up the first-boot setup AP while the device is unclaimed, so a
@@ -559,6 +562,51 @@ func reportTopologyLoop(ctx context.Context, collector *topology.Collector, node
 	}
 }
 
+// syncProfileLoop periodically pulls the active Home's profile from its
+// controller and re-applies it when it changes, so an operator editing the
+// Home's wireless (SSID/key) on the controller propagates to joined nodes
+// without re-onboarding. Pull-based: the node already holds the authenticated
+// mesh client; the controller need not track or reach nodes. A controller that
+// doesn't serve the active Home (404) or a transient error is skipped silently.
+func syncProfileLoop(ctx context.Context, controllers []string, clients *controllerClients, store storage.Store, pm profiles.ProfileManager, interval time.Duration) {
+	plain := &http.Client{Timeout: 10 * time.Second}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		homeID, err := store.GetActiveHome(ctx)
+		if err != nil || homeID == "" {
+			continue
+		}
+		for _, controllerURL := range controllers {
+			hc := clients.get(controllerURL)
+			if hc == nil {
+				hc = plain
+			}
+			remote, err := client.FetchProfile(ctx, controllerURL, homeID, hc)
+			if err != nil {
+				continue
+			}
+			local, _ := store.GetProfile(ctx, homeID)
+			if reflect.DeepEqual(remote, local) {
+				continue
+			}
+			log.Printf("profile for %s changed on %s; re-applying", homeID, controllerURL)
+			if err := store.CreateOrUpdateProfile(ctx, remote); err != nil {
+				log.Printf("sync profile: store failed: %v", err)
+				continue
+			}
+			if err := pm.ApplyProfile(ctx, remote); err != nil {
+				log.Printf("sync profile: apply failed: %v", err)
+			}
+		}
+	}
+}
+
 // autoOnboardWired runs the wired auto-onboard loop: an unclaimed node on the
 // wire enrolls into a discovered controller unattended. The decision policy
 // lives in the onboard package (tested there); this wires it to the daemon's
@@ -603,6 +651,8 @@ func autoOnboardWired(ctx context.Context, store storage.Store, collector *topol
 		// Push local topology to the controller we just joined (the no-Join
 		// branch starts no topology loop otherwise).
 		go reportTopologyLoop(ctx, collector, id.NodeID(), []string{controllerURL}, clients, 15*time.Second)
+		// Pull profile updates from the controller and re-apply on change.
+		go syncProfileLoop(ctx, []string{controllerURL}, clients, store, pm, 30*time.Second)
 		if afterJoin != nil {
 			afterJoin()
 		}

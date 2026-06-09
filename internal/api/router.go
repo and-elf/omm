@@ -279,7 +279,8 @@ func (h *apiHandler) registerMeshRoutes(r chi.Router) {
 	// Post-enrollment endpoints require a verified client cert (when mesh
 	// client-auth is on); the bootstrap /enroll/* endpoints do not, since a
 	// node reaches them before it has one.
-	r.Get("/homes/{homeID}", h.protected(h.getHome)) // nodes fetch joined-Home metadata
+	r.Get("/homes/{homeID}", h.protected(h.getHome))            // nodes fetch joined-Home metadata
+	r.Get("/homes/{homeID}/profile", h.protected(h.getProfile)) // nodes pull profile updates
 	if h.topology != nil {
 		r.Post("/topology/report", h.protected(h.reportTopology))
 	}
