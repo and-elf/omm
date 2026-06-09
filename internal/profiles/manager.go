@@ -71,6 +71,13 @@ type Config struct {
 	// Radio is the wifi-device that hosts the home's mesh + client AP
 	// (default "radio0").
 	Radio string
+	// MeshRadio, when set, hosts the 802.11s mesh on a dedicated wifi-device
+	// distinct from the client-AP radio. This is board-specific (radio names
+	// differ per device) and so configured per node, not in the home profile:
+	// on a tri-band board whose AP radio can't run mesh (e.g. the Lyra's
+	// IPQ40xx radio0), the mesh goes on the dedicated backhaul radio (radio2).
+	// Empty (default) keeps the mesh on the AP radio.
+	MeshRadio string
 	// Mesh verifies the 802.11s backhaul came up after apply, enabling the
 	// automatic degrade to multi-AP. nil disables verification (assume mesh).
 	Mesh MeshInspector
@@ -128,16 +135,24 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 		apSSID, apKey = profile.MeshSSID, profile.MeshKey
 	}
 
-	radio, err := m.resolveRadio(ctx, profile)
+	apRadio, err := m.resolveRadio(ctx, profile)
 	if err != nil {
 		return err
 	}
+	// The mesh can live on a dedicated backhaul radio (board-specific) while the
+	// client AP stays on the AP radio; absent that, both share the AP radio.
+	meshRadio := apRadio
+	if m.cfg.MeshRadio != "" {
+		meshRadio = m.cfg.MeshRadio
+	}
 
-	wireless := false
+	// Radios to enable at the end (a fresh OpenWrt radio ships disabled; enable
+	// it or its interfaces never start). Deduped so a shared radio is set once.
+	enable := map[string]bool{}
 
 	if profile.MeshSSID != "" {
 		mesh := map[string]string{
-			"device":  radio,
+			"device":  meshRadio,
 			"mode":    "mesh",
 			"mesh_id": profile.MeshSSID,
 			"network": "lan",
@@ -152,12 +167,25 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 		if err := m.uciClient.SetSection(ctx, "wireless", meshSection, "wifi-iface", mesh); err != nil {
 			return fmt.Errorf("set mesh wifi-iface: %w", err)
 		}
-		wireless = true
+		// Pin the mesh channel/width on its radio so every node's mesh lands on
+		// the same channel and can peer (a dedicated backhaul radio in particular
+		// must be driven to the home's common mesh channel).
+		if profile.MeshChannel != "" {
+			if err := m.uciClient.Set(ctx, "wireless", meshRadio, "channel", profile.MeshChannel); err != nil {
+				return fmt.Errorf("set mesh channel: %w", err)
+			}
+		}
+		if profile.MeshHTMode != "" {
+			if err := m.uciClient.Set(ctx, "wireless", meshRadio, "htmode", profile.MeshHTMode); err != nil {
+				return fmt.Errorf("set mesh htmode: %w", err)
+			}
+		}
+		enable[meshRadio] = true
 	}
 
 	if apSSID != "" {
 		ap := map[string]string{
-			"device":  radio,
+			"device":  apRadio,
 			"mode":    "ap",
 			"ssid":    apSSID,
 			"network": "lan",
@@ -171,14 +199,12 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 		if err := m.uciClient.SetSection(ctx, "wireless", apSection, "wifi-iface", ap); err != nil {
 			return fmt.Errorf("set ap wifi-iface: %w", err)
 		}
-		wireless = true
+		enable[apRadio] = true
 	}
 
-	// A fresh OpenWrt radio ships disabled; enable it or neither interface
-	// ever starts.
-	if wireless {
+	for radio := range enable {
 		if err := m.uciClient.Set(ctx, "wireless", radio, "disabled", "0"); err != nil {
-			return fmt.Errorf("enable radio: %w", err)
+			return fmt.Errorf("enable radio %s: %w", radio, err)
 		}
 	}
 

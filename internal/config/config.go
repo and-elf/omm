@@ -41,6 +41,7 @@ type Config struct {
 	UDPBroadcast string // broadcast endpoint for announcements
 	BSSID        string // controller mesh BSSID/MAC (explicit)
 	MeshIface    string // interface to read the BSSID from when BSSID is empty
+	MeshRadio    string // wifi-device hosting the 802.11s mesh (board-specific); empty = the AP radio
 
 	// Device identity and homes to join at startup.
 	IdentityDir string
@@ -138,6 +139,7 @@ func Load() Config {
 		UDPBroadcast: envOr("MESHD_UDP_BROADCAST", "255.255.255.255:45678"),
 		BSSID:        os.Getenv("MESHD_BSSID"),
 		MeshIface:    os.Getenv("MESHD_MESH_IFACE"),
+		MeshRadio:    os.Getenv("MESHD_MESH_RADIO"),
 
 		// Absolute default so an env-less hand-launch reuses the deployed
 		// identity instead of creating a new keypair under the current working

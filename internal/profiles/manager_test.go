@@ -185,6 +185,43 @@ func TestApplyProfilePinsRadioFromProfile(t *testing.T) {
 	}
 }
 
+// On a board whose client-AP radio can't run 802.11s (e.g. the Lyra's radio0),
+// the mesh must go on a dedicated backhaul radio (radio2) while the client AP
+// stays on the AP radio, and both nodes share one mesh channel/width so they
+// peer. cfg.MeshRadio selects the mesh radio; profile.MeshChannel/MeshHTMode
+// pin the shared channel and width on it.
+func TestApplyProfileMeshOnDedicatedBackhaulRadio(t *testing.T) {
+	fake := &fakeUCI{wireless: lyraRadios()}
+	m := NewManager(nil, fake, Config{Radio: "radio0", MeshRadio: "radio2"})
+
+	profile := models.Profile{
+		HomeID: "h1", MeshSSID: "omm", MeshKey: "secret123",
+		MeshChannel: "149", MeshHTMode: "HT20",
+	}
+	if err := m.ApplyProfile(context.Background(), profile); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+
+	// Mesh on the dedicated backhaul radio; client AP on the AP radio.
+	if got := fake.sections[meshSection]["device"]; got != "radio2" {
+		t.Fatalf("mesh device = %q, want radio2", got)
+	}
+	if got := fake.sections[apSection]["device"]; got != "radio0" {
+		t.Fatalf("ap device = %q, want radio0", got)
+	}
+	// Channel + width pinned on the mesh radio so peers line up.
+	if !contains(fake.sets, "wireless.radio2.channel=149") {
+		t.Fatalf("mesh channel not set on radio2; sets=%v", fake.sets)
+	}
+	if !contains(fake.sets, "wireless.radio2.htmode=HT20") {
+		t.Fatalf("mesh htmode not set on radio2; sets=%v", fake.sets)
+	}
+	// Both the mesh radio and the AP radio must be enabled.
+	if !contains(fake.sets, "wireless.radio2.disabled=0") || !contains(fake.sets, "wireless.radio0.disabled=0") {
+		t.Fatalf("both radios should be enabled; sets=%v", fake.sets)
+	}
+}
+
 // lyraRadios mirrors an Asus Lyra's layout: radio0/radio2 are 5 GHz, radio1 is
 // 2.4 GHz — i.e. radio0 is NOT 2.4 GHz, so band resolution can't assume names.
 func lyraRadios() map[string]map[string]string {
