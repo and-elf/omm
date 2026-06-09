@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/storage"
@@ -303,7 +304,7 @@ func TestApplyProfileMeshUpRecords80211s(t *testing.T) {
 func TestApplyProfileMeshDownDegradesToMultiAP(t *testing.T) {
 	fake := &fakeUCI{}
 	store := newStore(t)
-	m := NewManager(store, fake, Config{Mesh: fakeMesh{up: false}})
+	m := NewManager(store, fake, Config{Mesh: fakeMesh{up: false}, MeshVerifyInterval: time.Nanosecond})
 
 	prof := models.Profile{HomeID: "h1", MeshSSID: "omm", MeshKey: "secret123"}
 	if err := m.ApplyProfile(context.Background(), prof); err != nil {
@@ -353,7 +354,7 @@ func TestApplyProfileNoInspectorAssumes80211s(t *testing.T) {
 func TestApplyProfileNoMeshRecordsMultiAPWithoutReason(t *testing.T) {
 	fake := &fakeUCI{}
 	store := newStore(t)
-	m := NewManager(store, fake, Config{Mesh: fakeMesh{up: false}})
+	m := NewManager(store, fake, Config{Mesh: fakeMesh{up: false}, MeshVerifyInterval: time.Nanosecond})
 
 	if err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", APSSID: "HomeWiFi", APKey: "guestpass"}); err != nil {
 		t.Fatalf("apply: %v", err)

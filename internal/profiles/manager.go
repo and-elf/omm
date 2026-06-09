@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/storage"
@@ -73,11 +74,23 @@ type Config struct {
 	// Mesh verifies the 802.11s backhaul came up after apply, enabling the
 	// automatic degrade to multi-AP. nil disables verification (assume mesh).
 	Mesh MeshInspector
+	// MeshVerifyAttempts/Interval bound how long to wait for the mesh vif to
+	// instantiate before concluding it failed — a mesh point takes a few seconds
+	// to come up after a wireless reload, so a single immediate check would
+	// wrongly degrade. Defaults: 8 attempts, 1s apart (~8s).
+	MeshVerifyAttempts int
+	MeshVerifyInterval time.Duration
 }
 
 func (c Config) withDefaults() Config {
 	if c.Radio == "" {
 		c.Radio = "radio0"
+	}
+	if c.MeshVerifyAttempts == 0 {
+		c.MeshVerifyAttempts = 8
+	}
+	if c.MeshVerifyInterval == 0 {
+		c.MeshVerifyInterval = time.Second
 	}
 	return c
 }
@@ -219,13 +232,21 @@ func (m *Manager) verifyBackhaul(ctx context.Context, profile models.Profile) (m
 	if m.mesh == nil {
 		return models.BackhaulState{Mode: models.BackhaulMode80211s}, nil
 	}
-	up, err := m.mesh.MeshUp(ctx, meshSection)
-	if err != nil {
-		log.Printf("backhaul: mesh verification failed, assuming 802.11s: %v", err)
-		return models.BackhaulState{Mode: models.BackhaulMode80211s}, nil
-	}
-	if up {
-		return models.BackhaulState{Mode: models.BackhaulMode80211s}, nil
+	// A mesh vif takes a few seconds to instantiate after the reload, so poll
+	// before concluding it failed — checking once immediately would wrongly
+	// degrade a mesh that is still coming up.
+	for attempt := 0; attempt <= m.cfg.MeshVerifyAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(m.cfg.MeshVerifyInterval)
+		}
+		up, err := m.mesh.MeshUp(ctx, meshSection)
+		if err != nil {
+			log.Printf("backhaul: mesh verification failed, assuming 802.11s: %v", err)
+			return models.BackhaulState{Mode: models.BackhaulMode80211s}, nil
+		}
+		if up {
+			return models.BackhaulState{Mode: models.BackhaulMode80211s}, nil
+		}
 	}
 
 	log.Printf("backhaul: 802.11s mesh did not start; degrading to wired multi-AP")

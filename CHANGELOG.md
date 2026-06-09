@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Zero-touch defaults.** A fresh kit now self-forms with no configuration: the
+  controller's `adopt_policy` defaults to `onlink` (auto-adopt only nodes
+  verified to be on its own LAN) and a node's `auto_onboard_wired` defaults to on
+  (with `backhaul_iface` defaulting to `br-lan` so the wired backhaul is
+  classified), so powering the first device makes it a controller and cabling a
+  node joins it. Set `adopt_policy=off` / `auto_onboard_wired=0` to require the
+  wizard. Network posture management (`manage_network`) stays opt-in.
+
 ### Added
+- **Mesh-capable `wpad` provisioning.** So 802.11s actually forms (instead of
+  degrading to wired multi-AP): documented baking `wpad-mesh-*` into the firmware
+  image — the reliable path that also covers offline nodes — and added
+  `scripts/deploy.sh --install-wpad-mesh`, which detects a live device's crypto
+  variant and swaps `wpad-basic-*` for the matching `wpad-mesh-*`.
 - **Zero-config wired onboarding.** A freshly-flashed kit now comes up hands-off:
   power the first device and it becomes its own controller; cable a node and it
   discovers, enrolls, and receives its wireless — no wizard, no per-device
@@ -53,6 +67,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--set`/`--join`/`--watch`.
 
 ### Fixed
+- **802.11s mesh wrongly degraded to multi-AP even with a mesh-capable `wpad`.**
+  Two causes, found on a live IPQ board: the first-boot setup AP lingered on the
+  radio, so applying the mesh made it AP+AP+mesh on one radio (driver rejects it,
+  `nl80211 -95`) — meshd now retires the setup AP when a home activates, before
+  applying the profile; and the mesh-up check ran immediately after the wireless
+  reload, before the mesh vif had instantiated — it now polls for a few seconds
+  before concluding the mesh failed.
 - **Controller announce failed on a segment with no default route.** Announce
   dialed a connected socket to the limited broadcast `255.255.255.255`, which
   needs a route a gateway-less segment lacks (`network is unreachable`), so the

@@ -26,14 +26,14 @@ start_service() {
 	config_get controller_id main controller_id gw01
 	config_get mesh_ssid main mesh_ssid ""
 	config_get mesh_key main mesh_key ""
-	config_get adopt_policy main adopt_policy off
+	config_get adopt_policy main adopt_policy onlink
 	config_get controller_url main controller_url ""
 	config_get identity_dir main identity_dir /etc/meshd/identity
 	config_get serial main serial ""
-	config_get backhaul_iface main backhaul_iface ""
+	config_get backhaul_iface main backhaul_iface br-lan
 	config_get led_enabled main led_enabled 1
 	config_get led_name main led_name green:status
-	config_get auto_onboard_wired main auto_onboard_wired 0
+	config_get auto_onboard_wired main auto_onboard_wired 1
 	config_get onboard_grace main onboard_grace 20s
 	config_get manage_network main manage_network 0
 	config_get uplink_port main uplink_port ""
