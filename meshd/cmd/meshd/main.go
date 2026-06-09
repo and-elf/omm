@@ -297,8 +297,23 @@ func main() {
 	// idempotent (it respects an already-set active Home), so it is safe to run
 	// again after each join lands. Re-evaluate posture afterwards, since gaining
 	// an active Home transitions a Guest to controller/mesh-node.
+	// retireSetupAP brings down the first-boot setup AP (and marks setup complete)
+	// once a home is active: it is an unclaimed-only AP, and its radio vif would
+	// otherwise block the home's 802.11s mesh from coming up on radios that can't
+	// do AP+AP+mesh. Run before the profile is applied so the mesh has a free vif.
+	retireSetupAP := func(ctx context.Context) {
+		if complete, _ := store.GetSetupComplete(ctx); complete {
+			return
+		}
+		if err := store.SetSetupComplete(ctx, true); err != nil {
+			log.Printf("retire setup AP: mark complete failed: %v", err)
+		}
+		if err := completeSetupLocal(ctx); err != nil {
+			log.Printf("retire setup AP failed (non-fatal): %v", err)
+		}
+	}
 	autoSelect := func() {
-		autoSelectHome(ctx, store, profileManager, wifiClients, cfg.HomeID)
+		autoSelectHome(ctx, store, profileManager, wifiClients, cfg.HomeID, retireSetupAP)
 		applyPosture(ctx)
 	}
 
@@ -442,7 +457,12 @@ func resolveBSSID(cfg config.Config) string {
 // the home-selection policy fed by live RSSI. An already-set active Home is
 // respected (the operator's explicit choice wins). Best-effort: failures are
 // logged, not fatal.
-func autoSelectHome(ctx context.Context, store storage.Store, pm profiles.ProfileManager, signals topology.UbusClients, selfHomeID string) {
+// autoSelectHome activates a Home when none is set yet and applies its profile.
+// beforeApply (may be nil) runs after the Home is activated but BEFORE its
+// profile is applied — used to retire the first-boot setup AP so its radio vif
+// doesn't block the home's mesh from coming up (AP+AP+mesh exceeds some drivers'
+// interface combination).
+func autoSelectHome(ctx context.Context, store storage.Store, pm profiles.ProfileManager, signals topology.UbusClients, selfHomeID string, beforeApply func(context.Context)) {
 	if active, err := store.GetActiveHome(ctx); err != nil || active != "" {
 		return
 	}
@@ -467,6 +487,10 @@ func autoSelectHome(ctx context.Context, store storage.Store, pm profiles.Profil
 		return
 	}
 	log.Printf("auto-selected active home %s (signal=%d self=%v)", best.HomeID, best.Signal, best.SelfControlled)
+
+	if beforeApply != nil {
+		beforeApply(ctx)
+	}
 
 	if err := pm.ApplyProfileForHome(ctx, best.HomeID); err != nil {
 		log.Printf("auto-select: apply profile for %s failed (non-fatal): %v", best.HomeID, err)
