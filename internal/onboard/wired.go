@@ -56,6 +56,16 @@ type Deps struct {
 	// Join enrolls into the chosen controller and, on success, completes setup.
 	// Returning nil means the node is now onboarded and the loop stops.
 	Join func(ctx context.Context, controllerURL string) error
+	// Grace is how long to let discovery + onboarding try to claim the node
+	// before falling back to self-selection. <=0 disables the fallback (the node
+	// waits indefinitely for a controller). It exists so a node does not race
+	// ahead and select its own (last-resort) Home before discovery has had a
+	// chance to surface an external controller.
+	Grace time.Duration
+	// Fallback is invoked once, after Grace elapses with no controller to onboard
+	// into, so the node becomes its own controller rather than staying unclaimed
+	// forever. Typically wired to the boot home-selection. nil disables it.
+	Fallback func(ctx context.Context)
 }
 
 // Run polls the onboarding state and, when an unclaimed node is on the wire with
@@ -71,6 +81,12 @@ func Run(ctx context.Context, d Deps) {
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	var deadline time.Time
+	if d.Grace > 0 {
+		deadline = time.Now().Add(d.Grace)
+	}
+	fellBack := false
 
 	for {
 		complete, err := d.SetupComplete(ctx)
@@ -92,6 +108,14 @@ func Run(ctx context.Context, d Deps) {
 				log.Printf("auto-onboard: enrolled into %s over ethernet, setup complete", url)
 				return
 			}
+		} else if d.Fallback != nil && !fellBack && active == "" && d.Grace > 0 && time.Now().After(deadline) {
+			// No controller to onboard into within the grace window: fall back to
+			// self-selection so the node becomes its own controller rather than
+			// staying unclaimed. Fire once; a reachable-but-failing controller
+			// (Decide acted) keeps retrying above instead of falling back.
+			log.Printf("auto-onboard: no controller within grace, falling back to self-selection")
+			d.Fallback(ctx)
+			fellBack = true
 		}
 
 		select {

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strings"
+	"time"
 )
 
 // Config holds the meshd daemon settings. A daemon always runs as a controller
@@ -43,6 +44,12 @@ type Config struct {
 	// to be set, and the controller to auto-adopt for the join to complete
 	// without an operator approving it.
 	AutoOnboardWired bool
+
+	// OnboardGrace is how long an unclaimed wired node lets discovery +
+	// auto-onboarding try to claim it before falling back to selecting its own
+	// (last-resort) Home and becoming its own controller. Prevents the node from
+	// racing ahead and claiming itself before a controller is discovered.
+	OnboardGrace time.Duration
 
 	// Topology collection.
 	BatmanIface   string   // batman-adv interface (e.g. bat0)
@@ -110,7 +117,9 @@ func Load() Config {
 		UbusSocket: os.Getenv("MESHD_UBUS_SOCKET"),
 		UbusBinary: envOr("MESHD_UBUS_BINARY", "ubus"),
 
-		HomeID:       envOr("MESHD_HOME_ID", "default-home"),
+		// Empty by default: main derives a unique id from the device identity
+		// (DeriveHomeID) so fresh devices don't collide on a shared "default-home".
+		HomeID:       os.Getenv("MESHD_HOME_ID"),
 		HomeName:     envOr("MESHD_HOME_NAME", "Home"),
 		ControllerID: envOr("MESHD_CONTROLLER_ID", "gw01"),
 		AutoAdopt:    envBool("MESHD_AUTO_ADOPT"),
@@ -123,6 +132,7 @@ func Load() Config {
 		Serial:           envOr("MESHD_SERIAL", hostnameOr("unknown")),
 		Join:             splitList(os.Getenv("MESHD_JOIN")),
 		AutoOnboardWired: envBool("MESHD_AUTO_ONBOARD_WIRED"),
+		OnboardGrace:     envDurationOr("MESHD_ONBOARD_GRACE", 20*time.Second),
 
 		BatmanIface:   envOr("MESHD_BATMAN_IFACE", "bat0"),
 		APInterfaces:  splitList(os.Getenv("MESHD_AP_IFACES")),
@@ -141,6 +151,35 @@ func Load() Config {
 
 		DevCORS: envBool("MESHD_DEV_CORS"),
 	}
+}
+
+// envDurationOr parses a Go duration string (e.g. "20s", "1m") from key,
+// returning fallback when unset or unparseable.
+func envDurationOr(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return fallback
+}
+
+// DeriveHomeID builds a stable, unique default Home id from the device's node
+// id, used when home_id is not explicitly configured. Every unconfigured device
+// otherwise shares the literal "default-home", which makes them mutually
+// invisible to discovery (a peer's announcement looks like the node's own Home)
+// and unable to onboard. The node id is a hash of the device key, so this is
+// stable across reboots and unique per device. See doc/network-model.md.
+func DeriveHomeID(nodeID string) string {
+	const n = 12
+	short := nodeID
+	if len(short) > n {
+		short = short[:n]
+	}
+	if short == "" {
+		return "home-unknown"
+	}
+	return "home-" + short
 }
 
 func envOr(key, fallback string) string {

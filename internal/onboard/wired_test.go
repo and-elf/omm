@@ -158,6 +158,56 @@ func TestRunRetriesAfterJoinFailure(t *testing.T) {
 	}
 }
 
+// With no controller in reach, the node falls back to self-selection once the
+// grace window elapses — it becomes its own controller rather than waiting
+// forever (and never tries to join).
+func TestRunFallsBackToSelfAfterGrace(t *testing.T) {
+	joins, fallbacks := 0, 0
+	ctx, cancel := context.WithCancel(context.Background())
+	d := Deps{
+		Interval:      time.Millisecond,
+		Grace:         3 * time.Millisecond,
+		SelfHomeID:    "self",
+		SetupComplete: func(context.Context) (bool, error) { return false, nil },
+		ActiveHome:    func(context.Context) (string, error) { return "", nil },
+		Backhaul:      func(context.Context) string { return topology.BackhaulEthernet },
+		Discover:      func() []discovery.Announcement { return nil }, // no controllers
+		Join:          func(context.Context, string) error { joins++; return nil },
+		Fallback:      func(context.Context) { fallbacks++; cancel() },
+	}
+	Run(ctx, d)
+	if joins != 0 {
+		t.Fatalf("expected no join with no controller, got %d", joins)
+	}
+	if fallbacks != 1 {
+		t.Fatalf("expected exactly one fallback to self-selection, got %d", fallbacks)
+	}
+}
+
+// When a controller is in reach, onboarding wins: the node joins and never
+// falls back to self-selection, even with a grace window configured.
+func TestRunPrefersJoinOverFallback(t *testing.T) {
+	joins, fallbacks := 0, 0
+	d := Deps{
+		Interval:      time.Millisecond,
+		Grace:         time.Millisecond, // even a tiny grace must not pre-empt a join
+		SelfHomeID:    "self",
+		SetupComplete: func(context.Context) (bool, error) { return false, nil },
+		ActiveHome:    func(context.Context) (string, error) { return "", nil },
+		Backhaul:      func(context.Context) string { return topology.BackhaulEthernet },
+		Discover:      func() []discovery.Announcement { return []discovery.Announcement{ann("home-a", "https://a")} },
+		Join:          func(context.Context, string) error { joins++; return nil },
+		Fallback:      func(context.Context) { fallbacks++ },
+	}
+	Run(context.Background(), d)
+	if joins != 1 {
+		t.Fatalf("expected one join, got %d", joins)
+	}
+	if fallbacks != 0 {
+		t.Fatalf("expected no fallback when a controller is reachable, got %d", fallbacks)
+	}
+}
+
 func TestRunSkipsWhenNotWired(t *testing.T) {
 	joins, ticks := 0, 0
 	ctx, cancel := context.WithCancel(context.Background())

@@ -44,6 +44,15 @@ func main() {
 		log.Fatalf("failed to load device identity: %v", err)
 	}
 
+	// Derive a unique Home id from the device identity when none is configured,
+	// so fresh devices don't all share "default-home" (which makes them mutually
+	// invisible to discovery and unable to onboard). Done here, after identity
+	// loads and before anything uses cfg.HomeID.
+	if cfg.HomeID == "" {
+		cfg.HomeID = config.DeriveHomeID(id.NodeID())
+		log.Printf("home_id not configured; derived %q from device identity", cfg.HomeID)
+	}
+
 	db, err := storage.OpenDB(cfg.DatabasePath)
 	if err != nil {
 		log.Fatalf("failed to open database: %v", err)
@@ -273,14 +282,16 @@ func main() {
 	}
 
 	if len(cfg.Join) == 0 {
-		// No joins configured: select from the Homes already known.
-		go autoSelect()
-
-		// Wired auto-onboard: an unclaimed node on the wire enrolls into a
-		// discovered controller unattended. Only here (no explicit joins) so it
-		// never races operator-configured joins.
 		if cfg.AutoOnboardWired {
+			// Wired auto-onboard: an unclaimed node on the wire enrolls into a
+			// discovered controller unattended. Do NOT self-select here — that
+			// would claim this node's own Home and block onboarding; the onboard
+			// loop instead tries to enroll first and only falls back to
+			// self-selection (autoSelect) after a grace window with no controller.
 			go autoOnboardWired(ctx, store, collector, discoCache, id, profileManager, cfg, completeSetupLocal, autoSelect)
+		} else {
+			// No auto-onboard: select from the Homes already known (own, last-resort).
+			go autoSelect()
 		}
 	} else {
 		// Joining devices: wait to record the joined Home(s) before selecting,
@@ -525,10 +536,14 @@ func autoOnboardWired(ctx context.Context, store storage.Store, collector *topol
 
 	onboard.Run(ctx, onboard.Deps{
 		Interval:      5 * time.Second,
+		Grace:         cfg.OnboardGrace,
 		SelfHomeID:    cfg.HomeID,
 		SetupComplete: store.GetSetupComplete,
 		ActiveHome:    store.GetActiveHome,
 		Backhaul:      backhaul.Backhaul,
+		// After the grace window with no controller in reach, fall back to
+		// selecting this node's own Home (become its own controller).
+		Fallback: func(ctx context.Context) { afterJoin() },
 		Discover: func() []discovery.Announcement {
 			// Answer from the passively-maintained cache, dropping this device's
 			// own Home (Decide also filters it, defensively).
