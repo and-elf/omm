@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // clearAddrEnv removes the address env vars so each case starts from defaults.
 func clearAddrEnv(t *testing.T) {
@@ -53,6 +56,26 @@ func TestConfigHomeIDUnsetByDefault(t *testing.T) {
 	t.Setenv("MESHD_HOME_ID", "")
 	if c := Load(); c.HomeID != "" {
 		t.Fatalf("expected empty HomeID by default (derived later), got %q", c.HomeID)
+	}
+}
+
+// The identity dir defaults to an absolute path so an env-less hand-launch
+// reuses the deployed identity instead of minting a fresh keypair in whatever
+// the current working directory happens to be (which silently changes the
+// derived home id). MESHD_IDENTITY_DIR still overrides.
+func TestIdentityDirDefaultsAbsolute(t *testing.T) {
+	t.Setenv("MESHD_IDENTITY_DIR", "")
+	c := Load()
+	if c.IdentityDir != "/etc/meshd/identity" {
+		t.Fatalf("IdentityDir default = %q, want /etc/meshd/identity", c.IdentityDir)
+	}
+	if !filepath.IsAbs(c.IdentityDir) {
+		t.Fatalf("IdentityDir default %q is not absolute", c.IdentityDir)
+	}
+
+	t.Setenv("MESHD_IDENTITY_DIR", "/run/custom/id")
+	if c := Load(); c.IdentityDir != "/run/custom/id" {
+		t.Fatalf("IdentityDir override = %q, want /run/custom/id", c.IdentityDir)
 	}
 }
 

@@ -139,7 +139,11 @@ func Load() Config {
 		BSSID:        os.Getenv("MESHD_BSSID"),
 		MeshIface:    os.Getenv("MESHD_MESH_IFACE"),
 
-		IdentityDir:      envOr("MESHD_IDENTITY_DIR", "./meshd-identity"),
+		// Absolute default so an env-less hand-launch reuses the deployed
+		// identity instead of creating a new keypair under the current working
+		// directory (which silently changes the derived home id). The init
+		// script sets MESHD_IDENTITY_DIR to this same path explicitly.
+		IdentityDir:      envOr("MESHD_IDENTITY_DIR", "/etc/meshd/identity"),
 		Serial:           envOr("MESHD_SERIAL", hostnameOr("unknown")),
 		Join:             splitList(os.Getenv("MESHD_JOIN")),
 		AutoOnboardWired: envBoolOr("MESHD_AUTO_ONBOARD_WIRED", true),
