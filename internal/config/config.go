@@ -30,9 +30,12 @@ type Config struct {
 	// Home has none yet (so onboarding pushes wifi without the wizard). Empty
 	// MeshSSID derives a unique name from the Home id; empty MeshKey generates a
 	// random one (persisted in the profile).
-	MeshSSID     string
-	MeshKey      string
-	AutoAdopt    bool
+	MeshSSID string
+	MeshKey  string
+	// AdoptPolicy gates unattended adoption on the controller: "off" (operator
+	// approves), "onlink" (auto-adopt only nodes enrolling from this controller's
+	// LAN), or "always" (any node). Default off.
+	AdoptPolicy  string
 	APIAdvertise string // API URL announced to clients (defaults to HTTPAddr)
 	UDPBroadcast string // broadcast endpoint for announcements
 	BSSID        string // controller mesh BSSID/MAC (explicit)
@@ -130,7 +133,7 @@ func Load() Config {
 		ControllerID: envOr("MESHD_CONTROLLER_ID", "gw01"),
 		MeshSSID:     os.Getenv("MESHD_MESH_SSID"),
 		MeshKey:      os.Getenv("MESHD_MESH_KEY"),
-		AutoAdopt:    envBool("MESHD_AUTO_ADOPT"),
+		AdoptPolicy:  adoptPolicyEnv(),
 		APIAdvertise: os.Getenv("MESHD_API_ADVERTISE"),
 		UDPBroadcast: envOr("MESHD_UDP_BROADCAST", "255.255.255.255:45678"),
 		BSSID:        os.Getenv("MESHD_BSSID"),
@@ -159,6 +162,18 @@ func Load() Config {
 
 		DevCORS: envBool("MESHD_DEV_CORS"),
 	}
+}
+
+// adoptPolicyEnv resolves the adopt policy: MESHD_ADOPT_POLICY wins; otherwise
+// the legacy MESHD_AUTO_ADOPT boolean maps to "always"; default "off".
+func adoptPolicyEnv() string {
+	if p := os.Getenv("MESHD_ADOPT_POLICY"); p != "" {
+		return p
+	}
+	if envBool("MESHD_AUTO_ADOPT") {
+		return "always"
+	}
+	return "off"
 }
 
 // envDurationOr parses a Go duration string (e.g. "20s", "1m") from key,

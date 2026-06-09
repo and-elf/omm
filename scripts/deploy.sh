@@ -13,7 +13,7 @@
 #   ./scripts/deploy.sh <host> [--set option=value]... [--no-build]
 #
 # Examples:
-#   ./scripts/deploy.sh controller --set auto_adopt=1
+#   ./scripts/deploy.sh controller --set adopt_policy=onlink
 #   ./scripts/deploy.sh node
 #   ./scripts/deploy.sh node --set auto_onboard_wired=1 --set backhaul_iface=eth0
 set -euo pipefail

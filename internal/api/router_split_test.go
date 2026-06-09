@@ -82,7 +82,7 @@ func TestRouterPlaneEnrollmentSplit(t *testing.T) {
 	db, _ := storage.OpenDB(":memory:")
 	t.Cleanup(func() { db.Close() })
 	store := storage.NewStore(db)
-	svc := enrollment.NewService(store, enrollment.Options{HomeID: "h1", AutoAdopt: true})
+	svc := enrollment.NewService(store, enrollment.Options{HomeID: "h1", AdoptPolicy: enrollment.AdoptAlways})
 
 	mesh := NewMeshRouter(store, noopProfileManager{}, WithEnrollment(svc))
 	mgmt := NewManagementRouter(store, noopProfileManager{}, WithEnrollment(svc))

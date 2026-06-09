@@ -54,7 +54,7 @@ func TestEnrollmentIssuesCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate ca: %v", err)
 	}
-	svc := enrollment.NewService(newStore(t), enrollment.Options{HomeID: "home-1", AutoAdopt: true, CA: ca})
+	svc := enrollment.NewService(newStore(t), enrollment.Options{HomeID: "home-1", AdoptPolicy: enrollment.AdoptAlways, CA: ca})
 	id, _ := identity.Generate()
 
 	res := enroll(t, svc, id, "SN1")
@@ -83,7 +83,7 @@ func TestEnrollmentIssuesCertificate(t *testing.T) {
 }
 
 func TestEnrollmentWithoutCAIssuesNoCertificate(t *testing.T) {
-	svc := enrollment.NewService(newStore(t), enrollment.Options{HomeID: "home-1", AutoAdopt: true})
+	svc := enrollment.NewService(newStore(t), enrollment.Options{HomeID: "home-1", AdoptPolicy: enrollment.AdoptAlways})
 	id, _ := identity.Generate()
 
 	res := enroll(t, svc, id, "SN1")
@@ -107,7 +107,7 @@ func TestRequestRejectsIdentityMismatch(t *testing.T) {
 }
 
 func TestVerifyRejectsBadSignature(t *testing.T) {
-	svc := enrollment.NewService(newStore(t), enrollment.Options{HomeID: "home-1", AutoAdopt: true})
+	svc := enrollment.NewService(newStore(t), enrollment.Options{HomeID: "home-1", AdoptPolicy: enrollment.AdoptAlways})
 	id, _ := identity.Generate()
 
 	req, err := svc.Request(context.Background(), enrollment.RequestInput{
@@ -128,7 +128,7 @@ func TestVerifyRejectsBadSignature(t *testing.T) {
 
 func TestAutoAdoptEnrollsNode(t *testing.T) {
 	store := newStore(t)
-	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AutoAdopt: true})
+	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AdoptPolicy: enrollment.AdoptAlways})
 	id, _ := identity.Generate()
 
 	res := enroll(t, svc, id, "SN1")
@@ -157,7 +157,7 @@ func TestAutoAdoptEnrollsNode(t *testing.T) {
 
 func TestManualAdopt(t *testing.T) {
 	store := newStore(t)
-	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AutoAdopt: false})
+	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AdoptPolicy: enrollment.AdoptOff})
 	id, _ := identity.Generate()
 
 	res := enroll(t, svc, id, "SN1")
@@ -181,9 +181,40 @@ func TestManualAdopt(t *testing.T) {
 	}
 }
 
+// The AdoptOnlink policy adopts a verified node only when the controller sees
+// the enrollment arriving on-link (its own LAN), and leaves an off-link peer
+// pending — the trust decision is the controller's, on a signal it observes.
+func TestVerifyOnlinkPolicy(t *testing.T) {
+	for _, onlink := range []bool{true, false} {
+		store := newStore(t)
+		svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AdoptPolicy: enrollment.AdoptOnlink})
+		id, _ := identity.Generate()
+
+		req, err := svc.Request(context.Background(), enrollment.RequestInput{
+			NodeID: id.NodeID(), Serial: "SN1", PublicKey: id.PublicKeyDER(),
+		})
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		sig, _ := id.Sign(req.Challenge)
+		ctx := enrollment.WithPeerOnLink(context.Background(), onlink)
+		res, err := svc.Verify(ctx, enrollment.VerifyInput{EnrollmentID: req.EnrollmentID, Signature: sig})
+		if err != nil {
+			t.Fatalf("verify: %v", err)
+		}
+		want := models.EnrollmentPendingApproval
+		if onlink {
+			want = models.EnrollmentApproved
+		}
+		if res.Status != want {
+			t.Fatalf("onlink=%v: status=%q, want %q", onlink, res.Status, want)
+		}
+	}
+}
+
 func TestListPendingAndReject(t *testing.T) {
 	store := newStore(t)
-	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AutoAdopt: false})
+	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AdoptPolicy: enrollment.AdoptOff})
 
 	// Two devices verify (pending approval), one rejected.
 	idA, _ := identity.Generate()
@@ -215,7 +246,7 @@ func TestListPendingAndReject(t *testing.T) {
 
 func TestConcurrentEnrollments(t *testing.T) {
 	store := newStore(t)
-	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AutoAdopt: true})
+	svc := enrollment.NewService(store, enrollment.Options{HomeID: "home-1", AdoptPolicy: enrollment.AdoptAlways})
 
 	const n = 32
 	var wg sync.WaitGroup

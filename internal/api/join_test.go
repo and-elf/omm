@@ -26,7 +26,7 @@ func TestJoinEndpointEnrollsIntoAnotherController(t *testing.T) {
 	if err := cstore.CreateHome(context.Background(), models.Home{ID: "home-controller", Name: "Controller Home", Controller: "ctrl-mac"}); err != nil {
 		t.Fatalf("seed controller home: %v", err)
 	}
-	csvc := enrollment.NewService(cstore, enrollment.Options{HomeID: "home-controller", AutoAdopt: true})
+	csvc := enrollment.NewService(cstore, enrollment.Options{HomeID: "home-controller", AdoptPolicy: enrollment.AdoptAlways})
 	controllerSrv := httptest.NewServer(NewRouter(cstore, noopProfileManager{}, WithEnrollment(csvc)))
 	t.Cleanup(controllerSrv.Close)
 
@@ -35,7 +35,7 @@ func TestJoinEndpointEnrollsIntoAnotherController(t *testing.T) {
 	ddb, _ := storage.OpenDB(":memory:")
 	t.Cleanup(func() { ddb.Close() })
 	dstore := storage.NewStore(ddb)
-	dsvc := enrollment.NewService(dstore, enrollment.Options{HomeID: "home-device", AutoAdopt: true})
+	dsvc := enrollment.NewService(dstore, enrollment.Options{HomeID: "home-device", AdoptPolicy: enrollment.AdoptAlways})
 	deviceRouter := NewRouter(dstore, noopProfileManager{}, WithEnrollment(dsvc), WithSelf(id, "device-serial"))
 
 	// Drive the join through the device's API.
@@ -77,7 +77,7 @@ func TestJoinSurvivesCanceledRequestContext(t *testing.T) {
 	if err := cstore.CreateHome(context.Background(), models.Home{ID: "home-controller", Name: "Controller Home", Controller: "ctrl-mac"}); err != nil {
 		t.Fatalf("seed controller home: %v", err)
 	}
-	csvc := enrollment.NewService(cstore, enrollment.Options{HomeID: "home-controller", AutoAdopt: true})
+	csvc := enrollment.NewService(cstore, enrollment.Options{HomeID: "home-controller", AdoptPolicy: enrollment.AdoptAlways})
 	controllerSrv := httptest.NewServer(NewRouter(cstore, noopProfileManager{}, WithEnrollment(csvc)))
 	t.Cleanup(controllerSrv.Close)
 
@@ -85,7 +85,7 @@ func TestJoinSurvivesCanceledRequestContext(t *testing.T) {
 	ddb, _ := storage.OpenDB(":memory:")
 	t.Cleanup(func() { ddb.Close() })
 	dstore := storage.NewStore(ddb)
-	dsvc := enrollment.NewService(dstore, enrollment.Options{HomeID: "home-device", AutoAdopt: true})
+	dsvc := enrollment.NewService(dstore, enrollment.Options{HomeID: "home-device", AdoptPolicy: enrollment.AdoptAlways})
 	deviceRouter := NewRouter(dstore, noopProfileManager{}, WithEnrollment(dsvc), WithSelf(id, "device-serial"))
 
 	body := &bytes.Buffer{}
@@ -113,7 +113,7 @@ func TestJoinEndpointAbsentWithoutIdentity(t *testing.T) {
 	db, _ := storage.OpenDB(":memory:")
 	t.Cleanup(func() { db.Close() })
 	store := storage.NewStore(db)
-	svc := enrollment.NewService(store, enrollment.Options{HomeID: "h", AutoAdopt: true})
+	svc := enrollment.NewService(store, enrollment.Options{HomeID: "h", AdoptPolicy: enrollment.AdoptAlways})
 	router := NewRouter(store, noopProfileManager{}, WithEnrollment(svc)) // no WithSelf
 
 	rw := postJSON(t, router, "/enroll/join", joinInput{ControllerURL: "http://example"})

@@ -28,7 +28,7 @@ func TestJoinOverMeshTLS(t *testing.T) {
 	if err := cstore.CreateHome(ctx, models.Home{ID: "h1", Name: "Home", Certificate: ca.CertificatePEM()}); err != nil {
 		t.Fatalf("create home: %v", err)
 	}
-	svc := enrollment.NewService(cstore, enrollment.Options{HomeID: "h1", AutoAdopt: true, CA: ca})
+	svc := enrollment.NewService(cstore, enrollment.Options{HomeID: "h1", AdoptPolicy: enrollment.AdoptAlways, CA: ca})
 
 	controller, _ := identity.Generate()
 	serverLeaf, _ := ca.IssueCert(controller.PublicKeyDER())

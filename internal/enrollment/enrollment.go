@@ -45,10 +45,55 @@ type Repository interface {
 	GetProfile(ctx context.Context, homeID string) (models.Profile, error)
 }
 
+// AdoptPolicy decides when a controller auto-adopts a node that has passed
+// verification. The decision is the controller's, not the node's: an enrolling
+// node can claim anything, so trust is gated on what the controller can observe
+// (the request's source), never on the node's self-declared backhaul.
+type AdoptPolicy string
+
+const (
+	// AdoptOff never auto-adopts; an operator approves each node (default).
+	AdoptOff AdoptPolicy = "off"
+	// AdoptOnlink auto-adopts only nodes whose enrollment arrives from the
+	// controller's own LAN subnet (physically on the home network).
+	AdoptOnlink AdoptPolicy = "onlink"
+	// AdoptAlways auto-adopts any node that enrolls, regardless of source
+	// (trusted lab / test).
+	AdoptAlways AdoptPolicy = "always"
+)
+
+// autoAdopt reports whether a verified node should be adopted immediately under
+// this policy, given whether the enrolling peer is on the controller's LAN.
+func (p AdoptPolicy) autoAdopt(peerOnLink bool) bool {
+	switch p {
+	case AdoptAlways:
+		return true
+	case AdoptOnlink:
+		return peerOnLink
+	default:
+		return false
+	}
+}
+
+type peerOnLinkKey struct{}
+
+// WithPeerOnLink annotates ctx with whether the enrolling peer is on the
+// controller's own LAN (on-link). The API layer derives it from the request's
+// source address; Verify consults it for the AdoptOnlink policy.
+func WithPeerOnLink(ctx context.Context, onLink bool) context.Context {
+	return context.WithValue(ctx, peerOnLinkKey{}, onLink)
+}
+
+func peerOnLink(ctx context.Context) bool {
+	v, _ := ctx.Value(peerOnLinkKey{}).(bool)
+	return v
+}
+
 // Options configures a Service. Zero values fall back to sensible defaults.
 type Options struct {
-	HomeID    string
-	AutoAdopt bool
+	HomeID string
+	// AdoptPolicy gates unattended adoption (default AdoptOff).
+	AdoptPolicy AdoptPolicy
 	// CA, when set, is the Home CA used to issue a client/server certificate to
 	// each adopted node for mesh mutual TLS. When nil, no certificates are
 	// issued (enrollment stays signature-only).
@@ -155,7 +200,8 @@ func (s *Service) Request(ctx context.Context, in RequestInput) (RequestResult, 
 }
 
 // Verify checks the challenge signature. On success the enrollment advances to
-// pending_approval, and is adopted immediately when AutoAdopt is set.
+// pending_approval, and is adopted immediately when the AdoptPolicy allows it
+// for this peer (see WithPeerOnLink for the on-link signal).
 func (s *Service) Verify(ctx context.Context, in VerifyInput) (Result, error) {
 	e, err := s.repo.GetEnrollment(ctx, in.EnrollmentID)
 	if err != nil {
@@ -172,7 +218,7 @@ func (s *Service) Verify(ctx context.Context, in VerifyInput) (Result, error) {
 		return Result{}, err
 	}
 
-	if s.opts.AutoAdopt {
+	if s.opts.AdoptPolicy.autoAdopt(peerOnLink(ctx)) {
 		return s.approve(ctx, e)
 	}
 	return s.result(ctx, e), nil
