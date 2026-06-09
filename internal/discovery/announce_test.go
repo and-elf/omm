@@ -38,6 +38,39 @@ func TestAnnounceDiscoverRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDirectedBroadcasts(t *testing.T) {
+	addrs := []net.Addr{
+		&net.IPNet{IP: net.ParseIP("192.168.2.50"), Mask: net.CIDRMask(24, 32)},
+		&net.IPNet{IP: net.ParseIP("10.0.0.5"), Mask: net.CIDRMask(16, 32)},
+		&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)}, // IPv6 skipped
+	}
+	got := directedBroadcasts(addrs)
+	want := []string{"192.168.2.255", "10.0.255.255"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i, w := range want {
+		if got[i].String() != w {
+			t.Fatalf("broadcast[%d] = %s, want %s", i, got[i], w)
+		}
+	}
+}
+
+// broadcastTargets always includes an explicit target (e.g. 255.255.255.255)
+// even when no interface yields one, and deduplicates.
+func TestBroadcastTargetsIncludesExplicit(t *testing.T) {
+	limited := net.IPv4bcast // 255.255.255.255
+	found := false
+	for _, ip := range broadcastTargets(limited) {
+		if ip.Equal(limited) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("explicit broadcast target not included")
+	}
+}
+
 func TestFixAPIHostRewritesUnspecified(t *testing.T) {
 	src := net.ParseIP("10.0.0.5")
 	cases := []struct{ in, want string }{
