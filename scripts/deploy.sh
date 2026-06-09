@@ -28,6 +28,8 @@ shift
 
 build=1
 swap=1
+reset=0
+watch=0
 join_url=""
 sets=()
 while [ $# -gt 0 ]; do
@@ -35,6 +37,8 @@ while [ $# -gt 0 ]; do
 	--set) sets+=("$2"); shift 2 ;;
 	--no-build) build=0; shift ;;
 	--no-swap) swap=0; build=0; shift ;; # skip building/swapping the binary
+	--reset) reset=1; shift ;;           # wipe meshd state (DB) for a clean run
+	--watch) watch="$2"; shift 2 ;;      # tail meshd log for N seconds at the end
 	--join) join_url="$2"; shift 2 ;;    # after deploy, enroll into this controller
 	*) echo "unknown argument: $1" >&2; exit 1 ;;
 	esac
@@ -62,11 +66,28 @@ if [ "$swap" = 1 ]; then
 	fi
 	[ -f "bin/$device/meshd" ] || { echo "missing bin/$device/meshd (build first)" >&2; exit 1; }
 
-	echo "==> staging + swapping binary (stop, mv)"
+	echo "==> staging binary + init script$([ "$reset" = 1 ] && echo ' + fresh config')"
+	# Deploy the package, not just the binary: the init script maps UCI->env and
+	# changes alongside the binary, so a stale init (e.g. an old config_get
+	# default) would mask new behaviour. On --reset also restore the default
+	# config so the device is fully clean (network/other UCI untouched — the LAN
+	# address etc. live in /etc/config/network).
 	scp_ "bin/$device/meshd" /tmp/meshd.new
-	# Stop before swapping: an executable in use can't be overwritten in place
-	# (ETXTBSY), so we mv the staged file over the stopped binary.
-	ssh_ '/etc/init.d/meshd stop; mv /tmp/meshd.new /usr/bin/meshd; chmod 0755 /usr/bin/meshd'
+	scp_ package/meshd/files/meshd.init /tmp/meshd.init.new
+	reset_cmd=""
+	cfg_cmd=""
+	if [ "$reset" = 1 ]; then
+		# Factory-wipe state (bolt DB + identity/Home CA; meshd regenerates both).
+		reset_cmd='rm -rf /etc/meshd/meshd.bolt /etc/meshd/identity; '
+		scp_ package/meshd/files/meshd.config /tmp/meshd.config.new
+		cfg_cmd='mv /tmp/meshd.config.new /etc/config/meshd; '
+	fi
+	# Stop before swapping: a running executable can't be overwritten in place
+	# (ETXTBSY), so mv the staged files over the stopped service.
+	ssh_ "/etc/init.d/meshd stop; ${reset_cmd}${cfg_cmd}mv /tmp/meshd.new /usr/bin/meshd; chmod 0755 /usr/bin/meshd; mv /tmp/meshd.init.new /etc/init.d/meshd; chmod 0755 /etc/init.d/meshd"
+elif [ "$reset" = 1 ]; then
+	echo "==> factory-wiping meshd state (no swap)"
+	ssh_ '/etc/init.d/meshd stop; rm -rf /etc/meshd/meshd.bolt /etc/meshd/identity'
 fi
 
 applied_sets=0
@@ -78,8 +99,9 @@ for kv in "${sets[@]:-}"; do
 	applied_sets=1
 done
 
-# Restart when the binary changed or config changed; a join-only run doesn't.
-if [ "$swap" = 1 ] || [ "$applied_sets" = 1 ]; then
+# Restart when the binary changed, state was reset, or config changed; a
+# join-only run doesn't.
+if [ "$swap" = 1 ] || [ "$reset" = 1 ] || [ "$applied_sets" = 1 ]; then
 	echo "==> (re)starting meshd"
 	ssh_ '/etc/init.d/meshd restart; sleep 2; logread -e meshd | tail -4'
 fi
@@ -87,6 +109,11 @@ fi
 if [ -n "$join_url" ]; then
 	echo "==> joining $join_url"
 	ssh_ "ubus call meshd join_home '{\"controller_url\":\"$join_url\"}'"
+fi
+
+if [ "${watch:-0}" -gt 0 ] 2>/dev/null; then
+	echo "==> watching ${watch}s of meshd log"
+	ssh_ "sleep $watch; logread -e meshd | tail -20"
 fi
 
 echo "OK: $host"
