@@ -109,19 +109,30 @@ if [ "$wpad_mesh" = 1 ]; then
 	echo "==> ensuring mesh-capable wpad (802.11s)"
 	ssh_ 'sh -s' <<'REMOTE'
 set -e
-inst() { opkg list-installed 2>/dev/null; }
-if inst | grep -qE '^wpad-(mesh|wolfssl|openssl|mbedtls) '; then
+# Works with both package managers: apk (OpenWrt 25+/snapshot) and opkg (<=24.10).
+if command -v apk >/dev/null 2>&1; then PM=apk; else PM=opkg; fi
+inst() { if [ "$PM" = apk ]; then apk info 2>/dev/null; else opkg list-installed 2>/dev/null; fi; }
+if inst | grep -qE 'wpad-(mesh|wolfssl|openssl|mbedtls)'; then
 	echo "wpad already mesh-capable: $(inst | grep -oE 'wpad[^ ]*' | head -1)"; exit 0
 fi
 cur=$(inst | grep -oE 'wpad-basic-(mbedtls|wolfssl|openssl)' | head -1)
 [ -n "$cur" ] || { echo "no wpad-basic-* found; install a wpad-mesh-* manually"; exit 0; }
 crypto=${cur##*-}
-echo "swapping $cur -> wpad-mesh-$crypto"
-opkg update
-# Replace the conflicting basic variant: remove then install (brief wpad gap;
-# wifi reconfigures on the meshd restart that follows).
-opkg remove "$cur" >/dev/null 2>&1 || true
-opkg install "wpad-mesh-$crypto"
+echo "[$PM] swapping $cur -> wpad-mesh-$crypto"
+if [ "$PM" = apk ]; then
+	apk update
+	# The basic and mesh variants conflict (same wpad provides), and apk won't
+	# auto-replace an explicit world member, so remove then add. Brief wpad gap;
+	# wifi reconfigures on the meshd restart that follows.
+	apk del "$cur"
+	apk add "wpad-mesh-$crypto"
+else
+	opkg update
+	# opkg won't auto-swap a conflicting provider: remove the basic variant first
+	# (brief wpad gap; wifi reconfigures on the meshd restart that follows).
+	opkg remove "$cur" >/dev/null 2>&1 || true
+	opkg install "wpad-mesh-$crypto"
+fi
 echo "installed: $(inst | grep -oE 'wpad[^ ]*' | head -1)"
 REMOTE
 fi

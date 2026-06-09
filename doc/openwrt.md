@@ -71,13 +71,21 @@ Get a mesh-capable `wpad` onto each mesh device one of three ways:
 
 - **On a live device** (online — e.g. a controller, or a node after it has
   joined the home LAN): `scripts/deploy.sh <host> --install-wpad-mesh` detects
-  the installed crypto variant and swaps `wpad-basic-*` for the matching
-  `wpad-mesh-*`. Or by hand:
+  the package manager **and** the installed crypto variant and swaps
+  `wpad-basic-*` for the matching `wpad-mesh-*`. Or by hand:
 
   ```sh
-  opkg update
-  opkg remove wpad-basic-mbedtls && opkg install wpad-mesh-mbedtls   # match your crypto
+  # OpenWrt 25+/snapshot (apk) — apk swaps the conflicting wpad provider for you:
+  apk update && apk add wpad-mesh-mbedtls          # match your crypto
+
+  # OpenWrt <=24.10 (opkg) — remove the basic variant first:
+  opkg update && opkg remove wpad-basic-mbedtls && opkg install wpad-mesh-mbedtls
   ```
+
+  An airgapped device with no internet on the LAN side can instead route through
+  a laptop (share its uplink and point the device's default route at it), or
+  install a downloaded package file locally (`apk add ./wpad-mesh-*.apk` /
+  `opkg install ./wpad-mesh-*.ipk`).
 
 > **Why it isn't a hard package dependency.** All `wpad`/`hostapd`/
 > `wpa-supplicant` variants `PROVIDES: wpad` and conflict with one another, so a
