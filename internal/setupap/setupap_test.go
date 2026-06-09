@@ -49,6 +49,16 @@ func (r *recordingUCI) Delete(ctx context.Context, pkg, section string) error {
 	return nil
 }
 
+func (r *recordingUCI) AddListItem(ctx context.Context, pkg, section, option, value string) error {
+	r.ops = append(r.ops, "addlist:"+pkg+"."+section+"."+option)
+	return nil
+}
+
+func (r *recordingUCI) DelListItem(ctx context.Context, pkg, section, option, value string) error {
+	r.ops = append(r.ops, "dellist:"+pkg+"."+section+"."+option)
+	return nil
+}
+
 func (r *recordingUCI) Commit(ctx context.Context, pkg string) error {
 	r.ops = append(r.ops, "commit:"+pkg)
 	return nil

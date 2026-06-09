@@ -57,6 +57,16 @@ func (f *fakeUCI) Delete(ctx context.Context, pkg, section string) error {
 	return nil
 }
 
+func (f *fakeUCI) AddListItem(ctx context.Context, pkg, section, option, value string) error {
+	f.ops = append(f.ops, "addlist:"+pkg)
+	return nil
+}
+
+func (f *fakeUCI) DelListItem(ctx context.Context, pkg, section, option, value string) error {
+	f.ops = append(f.ops, "dellist:"+pkg)
+	return nil
+}
+
 // fakeMesh is an injectable MeshInspector: it reports a fixed up/down result
 // (or an error) for the mesh verification step.
 type fakeMesh struct {
