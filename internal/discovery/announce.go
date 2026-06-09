@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
+	"syscall"
 	"time"
 )
 
@@ -16,39 +18,125 @@ type Announcement struct {
 	API          string `json:"api"`
 }
 
-// Announce periodically broadcasts the controller announcement to address until
-// the context is cancelled. address is typically a broadcast endpoint such as
-// "255.255.255.255:45678".
+// Announce periodically broadcasts the controller announcement until the
+// context is cancelled. address supplies the destination port and an optional
+// explicit target host (e.g. "255.255.255.255:45678").
+//
+// It does NOT dial a connected socket to the limited broadcast 255.255.255.255:
+// that needs a route for it, which a segment with no default gateway lacks
+// (dial fails with "network is unreachable"). Instead it opens an unconnected,
+// SO_BROADCAST-enabled socket and sends to each interface's *subnet-directed*
+// broadcast (e.g. 192.168.2.255), which routes over the connected subnet route
+// with no default gateway — plus the explicit target best-effort for the routed
+// case.
 func Announce(ctx context.Context, address string, ann Announcement, interval time.Duration) error {
-	udpAddr, err := net.ResolveUDPAddr("udp4", address)
+	host, portStr, err := net.SplitHostPort(address)
 	if err != nil {
-		return fmt.Errorf("resolve announce address: %w", err)
+		return fmt.Errorf("parse announce address: %w", err)
 	}
-	conn, err := net.DialUDP("udp4", nil, udpAddr)
+	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		return fmt.Errorf("dial announce address: %w", err)
+		return fmt.Errorf("parse announce port: %w", err)
 	}
-	defer conn.Close()
+
+	pc, err := net.ListenPacket("udp4", ":0")
+	if err != nil {
+		return fmt.Errorf("open announce socket: %w", err)
+	}
+	defer pc.Close()
+	conn := pc.(*net.UDPConn)
+
+	// Permit sending to a broadcast address; without SO_BROADCAST the kernel
+	// rejects broadcast sends with EACCES ("permission denied").
+	if rc, cerr := conn.SyscallConn(); cerr == nil {
+		_ = rc.Control(func(fd uintptr) {
+			_ = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_BROADCAST, 1)
+		})
+	}
 
 	payload, err := json.Marshal(ann)
 	if err != nil {
 		return err
 	}
 
+	explicit := net.ParseIP(host)
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	// Announce immediately, then on each tick. Write errors are transient (e.g.
-	// a connected-UDP peer momentarily down yields ECONNREFUSED via an ICMP
-	// port-unreachable); keep announcing rather than giving up.
+	// Announce immediately, then on each tick, to every target. Per-target write
+	// errors are ignored: an unroutable target (e.g. 255.255.255.255 with no
+	// default route) must not stop announcing on the targets that do work.
 	for {
-		_, _ = conn.Write(payload)
+		for _, ip := range broadcastTargets(explicit) {
+			_, _ = conn.WriteTo(payload, &net.UDPAddr{IP: ip, Port: port})
+		}
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
 		}
 	}
+}
+
+// broadcastTargets is the set of IPv4 destinations to announce to: every up,
+// broadcast-capable interface's subnet-directed broadcast, plus the explicit
+// target (when set) deduplicated. The directed broadcasts are what reach peers
+// on a segment with no default route.
+func broadcastTargets(explicit net.IP) []net.IP {
+	var out []net.IP
+	seen := map[string]bool{}
+	add := func(ip net.IP) {
+		if ip == nil {
+			return
+		}
+		if k := ip.String(); !seen[k] {
+			seen[k] = true
+			out = append(out, ip)
+		}
+	}
+
+	ifaces, _ := net.Interfaces()
+	for _, ifi := range ifaces {
+		if ifi.Flags&net.FlagUp == 0 || ifi.Flags&net.FlagBroadcast == 0 {
+			continue
+		}
+		addrs, _ := ifi.Addrs()
+		for _, ip := range directedBroadcasts(addrs) {
+			add(ip)
+		}
+	}
+	add(explicit)
+	return out
+}
+
+// directedBroadcasts computes the subnet broadcast address for each IPv4
+// address in addrs (host bits set: ip | ^mask).
+func directedBroadcasts(addrs []net.Addr) []net.IP {
+	var out []net.IP
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip4 := ipnet.IP.To4()
+		if ip4 == nil {
+			continue
+		}
+		mask := ipnet.Mask
+		if len(mask) == net.IPv6len {
+			mask = mask[12:]
+		}
+		if len(mask) != net.IPv4len {
+			continue
+		}
+		b := make(net.IP, net.IPv4len)
+		for i := range net.IPv4len {
+			b[i] = ip4[i] | ^mask[i]
+		}
+		out = append(out, b)
+	}
+	return out
 }
 
 // DiscoverController listens on listenAddr for the first controller
