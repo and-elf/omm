@@ -136,8 +136,9 @@ func main() {
 	}
 
 	profileManager := profiles.NewManager(store, uciClient, profiles.Config{
-		Radio: cfg.SetupAPRadio,
-		Mesh:  profiles.UbusMeshInspector{Ubus: ubusClient},
+		Radio:     cfg.SetupAPRadio,
+		MeshRadio: cfg.MeshRadio,
+		Mesh:      profiles.UbusMeshInspector{Ubus: ubusClient},
 	})
 
 	// Network posture: keep the node's network/dhcp/firewall aligned with its

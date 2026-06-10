@@ -36,6 +36,13 @@ type Profile struct {
 	Band  string   `json:"band"`
 	Radio string   `json:"radio"`
 	VLANs []string `json:"vlans"`
+	// MeshChannel/MeshHTMode pin the 802.11s backhaul's channel and width
+	// home-wide, so every node's mesh lands on the same channel and lines up to
+	// peer. Empty leaves the mesh radio's existing channel/width untouched. The
+	// channel must be one the mesh radio supports (e.g. a 5 GHz-high channel for
+	// a dedicated backhaul radio); pair with meshd's per-node mesh_radio setting.
+	MeshChannel string `json:"mesh_channel"`
+	MeshHTMode  string `json:"mesh_htmode"`
 }
 
 // Backhaul mode: the wireless-backhaul technology actually in effect on a node
