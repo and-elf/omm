@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/and-elf/omm/internal/api"
+	"github.com/and-elf/omm/internal/backhaul"
 	"github.com/and-elf/omm/internal/client"
 	"github.com/and-elf/omm/internal/config"
 	"github.com/and-elf/omm/internal/deviceled"
@@ -337,7 +338,7 @@ func main() {
 			// would claim this node's own Home and block onboarding; the onboard
 			// loop tries to enroll first and only falls back (becomeOwnController)
 			// after a grace window with no controller.
-			go autoOnboardWired(ctx, store, collector, discoCache, id, profileManager, cfg, completeSetupLocal, autoSelect, becomeOwnController)
+			go autoOnboardWired(ctx, store, collector, discoCache, id, profileManager, uciClient, cfg, completeSetupLocal, autoSelect, becomeOwnController)
 		} else {
 			// No auto-onboard: select from the Homes already known (own, last-resort).
 			go autoSelect()
@@ -356,6 +357,9 @@ func main() {
 		go reportTopologyLoop(ctx, collector, id.NodeID(), cfg.Join, meshClients, 15*time.Second)
 		// Pull profile updates from the joined controller(s) and re-apply on change.
 		go syncProfileLoop(ctx, cfg.Join, meshClients, store, profileManager, 30*time.Second)
+		// Keep ethernet prioritized: the 802.11s mesh is a standby that activates
+		// only when the wired uplink loses carrier.
+		startBackhaulFailover(ctx, uciClient, cfg.BackhaulIface)
 	}
 
 	// Bring up the first-boot setup AP while the device is unclaimed, so a
@@ -512,6 +516,48 @@ func autoSelectHome(ctx context.Context, store storage.Store, pm profiles.Profil
 	}
 }
 
+// startBackhaulFailover launches the ethernet/wireless backhaul switcher for a
+// joined node: ethernet is always preferred, and the 802.11s mesh is a standby
+// that activates only when the wired uplink loses carrier (and is torn down when
+// the wire returns, which also avoids an ethernet+mesh bridging loop).
+//
+// backhaulIface is the wired uplink whose carrier is watched. It must be a
+// discrete uplink port (e.g. "eth0"/"wan"); the LAN bridge "br-lan" (the
+// default) is not — its carrier stays up from any bridge member, so it can't
+// signal "the wire to the controller is gone". Failover therefore stays off for
+// the default and engages only once an operator sets backhaul_iface to the real
+// uplink port — leaving existing single-backhaul deployments unchanged. The
+// actuator no-ops when no mesh iface is configured (a degraded multi-AP node has
+// nothing to fail over to).
+func startBackhaulFailover(ctx context.Context, uciClient uci.Client, backhaulIface string) {
+	if backhaulIface == "" || backhaulIface == "br-lan" {
+		return
+	}
+	setMesh := func(enabled bool) func(context.Context) error {
+		return func(ctx context.Context) error {
+			if mode, err := uciClient.Get(ctx, "wireless", profiles.MeshSection, "mode"); err != nil || mode == "" {
+				return nil // no mesh configured: nothing to switch
+			}
+			disabled := "1"
+			if enabled {
+				disabled = "0"
+			}
+			if err := uciClient.Set(ctx, "wireless", profiles.MeshSection, "disabled", disabled); err != nil {
+				return err
+			}
+			if err := uciClient.Commit(ctx, "wireless"); err != nil {
+				return err
+			}
+			return uciClient.Reload(ctx)
+		}
+	}
+	go backhaul.Run(ctx, backhaul.Deps{
+		Carrier:    topology.SysfsBackhaul{Iface: backhaulIface}.Backhaul,
+		Activate:   setMesh(true),
+		Deactivate: setMesh(false),
+	})
+}
+
 // reportTopologyLoop periodically pushes this node's local topology to its
 // controllers so they can build a mesh-wide view.
 // controllerClients holds the authenticated mesh HTTP client for each joined
@@ -612,7 +658,7 @@ func syncProfileLoop(ctx context.Context, controllers []string, clients *control
 // wire enrolls into a discovered controller unattended. The decision policy
 // lives in the onboard package (tested there); this wires it to the daemon's
 // store, backhaul detection, discovery cache and join flow.
-func autoOnboardWired(ctx context.Context, store storage.Store, collector *topology.Collector, disco *discovery.Cache, id *identity.Identity, pm profiles.ProfileManager, cfg config.Config, completeSetup func(context.Context) error, afterJoin, fallback func()) {
+func autoOnboardWired(ctx context.Context, store storage.Store, collector *topology.Collector, disco *discovery.Cache, id *identity.Identity, pm profiles.ProfileManager, uciClient uci.Client, cfg config.Config, completeSetup func(context.Context) error, afterJoin, fallback func()) {
 	backhaul := topology.SysfsBackhaul{Iface: cfg.BackhaulIface}
 	clients := &controllerClients{}
 
@@ -654,6 +700,8 @@ func autoOnboardWired(ctx context.Context, store storage.Store, collector *topol
 		go reportTopologyLoop(ctx, collector, id.NodeID(), []string{controllerURL}, clients, 15*time.Second)
 		// Pull profile updates from the controller and re-apply on change.
 		go syncProfileLoop(ctx, []string{controllerURL}, clients, store, pm, 30*time.Second)
+		// Keep ethernet prioritized once joined; the mesh stands by for failover.
+		startBackhaulFailover(ctx, uciClient, cfg.BackhaulIface)
 		if afterJoin != nil {
 			afterJoin()
 		}
