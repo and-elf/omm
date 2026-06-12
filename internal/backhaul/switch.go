@@ -49,15 +49,26 @@ type Deps struct {
 	// OnSwitch records the now-active backhaul after a successful switch (e.g. to
 	// persist state for /status and the topology). Optional.
 	OnSwitch func(ctx context.Context, backhaul string)
+	// Current observes the actual active backhaul (e.g. derived from whether the
+	// mesh iface is enabled) so the loop reconciles against reality each tick,
+	// not only against carrier transitions. This corrects the mesh being
+	// re-enabled out from under the loop — e.g. a profile re-apply on a joined
+	// node's boot recreates the mesh enabled while the wire is up, which would
+	// otherwise leave a standing ethernet+mesh bridging loop. Optional: when nil
+	// (or it returns ""), the loop tracks its own last-applied state from Initial.
+	Current func(ctx context.Context) string
 	// Initial is the backhaul assumed at start. Empty (unknown) makes the first
 	// real carrier reading establish — and apply — the baseline.
 	Initial string
 }
 
 // Run polls the wired uplink and switches the node's backhaul, keeping ethernet
-// preferred and the wireless mesh as a standby. It applies a switch only on a
-// transition (and retries the actuation on failure, since the next tick will
-// see the same desired state). It returns when ctx is done.
+// preferred and the wireless mesh as a standby. When Current is set it reconciles
+// against the actual mesh state each tick (so an external re-enable — e.g. a
+// profile re-apply on boot — is corrected, not just carrier transitions);
+// otherwise it tracks its own last-applied state. It retries the actuation on
+// failure, since the next tick will see the same desired state. Returns when ctx
+// is done.
 func Run(ctx context.Context, d Deps) {
 	interval := d.Interval
 	if interval <= 0 {
@@ -68,6 +79,14 @@ func Run(ctx context.Context, d Deps) {
 
 	current := d.Initial
 	for {
+		// Prefer the observed actual backhaul so the loop self-heals when the
+		// mesh is enabled/disabled out from under it; fall back to the tracked
+		// state when it is unobservable (nil or "" reading).
+		if d.Current != nil {
+			if observed := d.Current(ctx); observed != "" {
+				current = observed
+			}
+		}
 		if desired, change := Decide(d.Carrier(ctx), current); change {
 			act, label := d.Deactivate, topology.BackhaulEthernet
 			if desired == topology.BackhaulWireless {
