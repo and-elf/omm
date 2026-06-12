@@ -56,7 +56,7 @@ start_service() {
 		MESHD_MESH_KEY="$mesh_key" \
 		MESHD_MESH_RADIO="$mesh_radio" \
 		MESHD_ADOPT_POLICY="$adopt_policy" \
-		MESHD_CONTROLLER="$controller_url" \
+		MESHD_JOIN="$controller_url" \
 		MESHD_IDENTITY_DIR="$identity_dir" \
 		MESHD_SERIAL="$serial" \
 		MESHD_BACKHAUL_IFACE="$backhaul_iface" \
