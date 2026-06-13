@@ -61,8 +61,10 @@ type ProfileManager interface {
 const (
 	// Dedicated section names so authoring a home's wireless never disturbs an
 	// operator's own wifi-iface sections (matching the setupap convention). UCI
-	// section names allow [A-Za-z0-9_] only, hence no hyphen.
-	meshSection = "omm_mesh"
+	// section names allow [A-Za-z0-9_] only, hence no hyphen. MeshSection is
+	// exported so the daemon's backhaul failover can enable/disable the mesh.
+	MeshSection = "omm_mesh"
+	meshSection = MeshSection
 	apSection   = "omm_ap"
 )
 
