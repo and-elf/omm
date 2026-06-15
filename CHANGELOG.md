@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wizard. Network posture management (`manage_network`) stays opt-in.
 
 ### Added
-- **batman-adv multi-hop routing.** meshd now authors a batman-adv mesh as the
+d- **batman-adv multi-hop routing.** meshd now authors a batman-adv mesh as the
   forwarding layer instead of bridging the 802.11s mesh straight onto the LAN: a
   `bat0` soft interface with bridge-loop-avoidance, one batadv hard interface per
   backhaul link (the wireless mesh *and* each configured wired port,
@@ -28,13 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the carrier-toggle failover, which is disabled when batman is active. On by
   default (`batman`), auto-degrading to the direct mesh-on-LAN bridge when the
   batman-adv module/netifd proto is absent; configurable via `batman`,
-  `batman_ports`, `batman_routing_algo`. Requires `kmod-batman-adv`, `batman-adv`
-  and `batctl` on the image.
+  `batman_ports`, `batman_routing_algo`. Requires `kmod-batman-adv` (which ships
+  the netifd proto handlers) and `batctl` on the image.
 - **Mesh-capable `wpad` provisioning.** So 802.11s actually forms (instead of
   degrading to wired multi-AP): documented baking `wpad-mesh-*` into the firmware
   image — the reliable path that also covers offline nodes — and added
-  `scripts/deploy.sh --install-wpad-mesh`, which detects a live device's crypto
-  variant and swaps `wpad-basic-*` for the matching `wpad-mesh-*`.
+  `scripts/deploy.sh --install-dependencies`, which detects a live device's
+  crypto variant and swaps `wpad-basic-*` for the matching `wpad-mesh-*` (and
+  installs the `kmod-batman-adv`/`batctl` routing stack).
 - **Zero-config wired onboarding.** A freshly-flashed kit now comes up hands-off:
   power the first device and it becomes its own controller; cable a node and it
   discovers, enrolls, and receives its wireless — no wizard, no per-device

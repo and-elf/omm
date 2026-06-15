@@ -67,15 +67,17 @@ Get a mesh-capable `wpad` onto each mesh device one of three ways:
   ```
   (Match your image's crypto backend: `-mbedtls`/`-wolfssl`/`-openssl`. The
   leading `-` drops the default basic variant it conflicts with.) For multi-hop
-  routing add the batman-adv stack: `kmod-batman-adv` (kernel module),
-  `batman-adv` (the netifd `batadv`/`batadv_hardif` protocol handlers meshd
-  authors) and `batctl` (topology reads). Without these meshd falls back to
-  bridging the mesh directly onto `lan` (single-hop only).
+  routing add the batman-adv stack: `kmod-batman-adv` (the kernel module, which
+  also ships the netifd `batadv`/`batadv_hardif` protocol handlers meshd authors
+  — there is no separate userspace `batman-adv` package) and `batctl` (topology
+  reads). Without these meshd falls back to bridging the mesh directly onto `lan`
+  (single-hop only).
 
 - **On a live device** (online — e.g. a controller, or a node after it has
-  joined the home LAN): `scripts/deploy.sh <host> --install-wpad-mesh` detects
-  the package manager **and** the installed crypto variant and swaps
-  `wpad-basic-*` for the matching `wpad-mesh-*`. Or by hand:
+  joined the home LAN): `scripts/deploy.sh <host> --install-dependencies` detects
+  the package manager, swaps `wpad-basic-*` for the matching `wpad-mesh-*` (by
+  the installed crypto variant), and installs the `kmod-batman-adv`/`batctl`
+  routing stack. Or by hand:
 
   ```sh
   # OpenWrt 25+/snapshot (apk) — apk swaps the conflicting wpad provider for you:
