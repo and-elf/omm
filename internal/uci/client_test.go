@@ -328,3 +328,23 @@ func TestDelListItemAbsentNoOp(t *testing.T) {
 		}
 	}
 }
+
+// Removing the last member of a list must clear the option via uci `delete`:
+// rpcd's `set` with an empty array is a no-op, which would leave the removed
+// member behind (the live br-lan `ports='bat0'` leftover after a batman teardown).
+func TestDelListItemLastMemberClearsOption(t *testing.T) {
+	fake := &fakeUbusClient{response: listResponse("bat0")}
+	client := &client{ubusClient: fake}
+
+	if err := client.DelListItem(context.Background(), "network", "@device[0]", "ports", "bat0"); err != nil {
+		t.Fatalf("DelListItem: %v", err)
+	}
+	last := fake.calls[len(fake.calls)-1]
+	if last.method != "delete" {
+		t.Fatalf("emptying a list should issue uci delete of the option, got %q", last.method)
+	}
+	params, _ := fake.lastParams.(map[string]string)
+	if params["option"] != "ports" || params["section"] != "@device[0]" {
+		t.Fatalf("unexpected delete params: %#v", fake.lastParams)
+	}
+}

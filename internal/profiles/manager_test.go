@@ -40,6 +40,11 @@ func (f *fakeUCI) Sections(ctx context.Context, pkg string) (map[string]map[stri
 func (f *fakeUCI) Set(ctx context.Context, pkg, section, option, value string) error {
 	f.ops = append(f.ops, "set:"+pkg)
 	f.sets = append(f.sets, pkg+"."+section+"."+option+"="+value)
+	// Reflect a scalar set into an already-authored section so tests can observe
+	// post-author edits (e.g. re-pointing omm_mesh.network on a batman fallback).
+	if sec := f.sections[section]; sec != nil {
+		sec[option] = value
+	}
 	return nil
 }
 

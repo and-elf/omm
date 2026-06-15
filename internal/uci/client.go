@@ -221,8 +221,17 @@ func (c *client) getList(ctx context.Context, packageName, section, option strin
 }
 
 // setList writes a list-valued option in one `uci set` call, passing the values
-// as an array (rpcd sets a list option when the value is an array).
+// as an array (rpcd sets a list option when the value is an array). An empty
+// list is written by deleting the option: `set` with an empty array is a no-op
+// on rpcd, which would otherwise leave the last removed member behind.
 func (c *client) setList(ctx context.Context, packageName, section, option string, values []string) error {
+	if len(values) == 0 {
+		return c.ubusClient.Call(ctx, "uci", "delete", map[string]string{
+			"config":  packageName,
+			"section": section,
+			"option":  option,
+		}, nil)
+	}
 	return c.ubusClient.Call(ctx, "uci", "set", map[string]interface{}{
 		"config":  packageName,
 		"section": section,

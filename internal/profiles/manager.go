@@ -190,10 +190,10 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 	// batman-adv routing layer: when enabled, the 802.11s mesh attaches to a
 	// batadv hard interface (so batman-adv forwards loop-free, multi-hop across
 	// any mix of wired and wireless links) instead of bridging straight onto lan.
-	// It is authored before the wireless so we can verify bat0 actually came up
-	// and wire the mesh accordingly — degrading to the direct lan bridge when the
-	// batman-adv module/proto is absent, rather than stranding the mesh on a dead
-	// hard interface.
+	// We author the bat0 sections here and point the mesh at the hard interface
+	// below; the bat0 device only materializes once a hardif with a real device
+	// (the mesh vif) is attached, so verification + the degrade-to-lan fallback
+	// happen *after* the wireless is authored and reloaded (see batmanFallback).
 	meshNetwork := "lan"
 	var bm *batman.Manager
 	if m.cfg.BatmanEnable && profile.MeshSSID != "" {
@@ -206,26 +206,7 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 		if err := bm.Apply(ctx); err != nil {
 			return fmt.Errorf("author batman-adv: %w", err)
 		}
-		if err := m.uciClient.Commit(ctx, "network"); err != nil {
-			return fmt.Errorf("commit network: %w", err)
-		}
-		if err := m.uciClient.Reload(ctx); err != nil {
-			return fmt.Errorf("reload after batman: %w", err)
-		}
-		if m.batmanUp(ctx) {
-			meshNetwork = bm.MeshHardif()
-		} else {
-			log.Printf("backhaul: batman-adv did not come up; bridging mesh onto lan directly")
-			if err := bm.Teardown(ctx); err != nil {
-				return fmt.Errorf("tear down batman-adv: %w", err)
-			}
-			if err := m.uciClient.Commit(ctx, "network"); err != nil {
-				return fmt.Errorf("commit network after batman teardown: %w", err)
-			}
-			if err := m.uciClient.Reload(ctx); err != nil {
-				return fmt.Errorf("reload after batman teardown: %w", err)
-			}
-		}
+		meshNetwork = bm.MeshHardif()
 	}
 
 	// Radios to enable at the end (a fresh OpenWrt radio ships disabled; enable
@@ -296,6 +277,12 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 		}
 	}
 
+	if bm != nil {
+		if err := m.uciClient.Commit(ctx, "network"); err != nil {
+			return fmt.Errorf("commit network: %w", err)
+		}
+	}
+
 	if err := m.uciClient.Commit(ctx, "wireless"); err != nil {
 		return fmt.Errorf("commit wireless: %w", err)
 	}
@@ -308,6 +295,15 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 	// takes effect on the running system.
 	if err := m.uciClient.Reload(ctx); err != nil {
 		return fmt.Errorf("reload config: %w", err)
+	}
+
+	// Now that the mesh vif is attached to the batadv hard interface, verify bat0
+	// actually came up; if not (module/proto absent), tear batman down and bridge
+	// the mesh directly onto lan so the node still has a working single-hop mesh.
+	if bm != nil {
+		if err := m.batmanFallback(ctx, bm); err != nil {
+			return err
+		}
 	}
 
 	// Verify the 802.11s backhaul actually came up and degrade to a wired
@@ -347,6 +343,34 @@ func (m *Manager) batmanUp(ctx context.Context) bool {
 		}
 	}
 	return false
+}
+
+// batmanFallback verifies bat0 came up after the wireless reload and, if it did
+// not, bridges the mesh directly onto lan instead: it re-points the mesh vif's
+// network at lan, tears the batman sections down, and reloads. This runs after
+// the mesh is authored onto the hard interface, because bat0 only instantiates
+// once that hardif has a real device. A bat0 that is up is left untouched.
+func (m *Manager) batmanFallback(ctx context.Context, bm *batman.Manager) error {
+	if m.batmanUp(ctx) {
+		return nil
+	}
+	log.Printf("backhaul: batman-adv did not come up; bridging mesh onto lan directly")
+	if err := m.uciClient.Set(ctx, "wireless", meshSection, "network", "lan"); err != nil {
+		return fmt.Errorf("re-point mesh to lan: %w", err)
+	}
+	if err := bm.Teardown(ctx); err != nil {
+		return fmt.Errorf("tear down batman-adv: %w", err)
+	}
+	if err := m.uciClient.Commit(ctx, "network"); err != nil {
+		return fmt.Errorf("commit network after batman teardown: %w", err)
+	}
+	if err := m.uciClient.Commit(ctx, "wireless"); err != nil {
+		return fmt.Errorf("commit wireless after batman teardown: %w", err)
+	}
+	if err := m.uciClient.Reload(ctx); err != nil {
+		return fmt.Errorf("reload after batman teardown: %w", err)
+	}
+	return nil
 }
 
 // verifyBackhaul determines the wireless-backhaul outcome after a profile is

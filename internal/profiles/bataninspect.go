@@ -7,35 +7,33 @@ import (
 )
 
 // UbusBatmanInspector implements BatmanInspector against a live OpenWrt by
-// reading `ubus call network.interface dump` and checking whether the batman
-// soft interface (bat0) is up. It uses the dump (not a per-interface status
-// call) so an absent interface — netifd never created bat0 because the
-// batman-adv kernel module or netifd proto handler is missing — is reported as a
-// clean (false, nil) "not up", distinct from a transport error.
+// asking netifd whether the batman soft interface device (bat0) exists:
+// `ubus call network.device status {"name":"bat0"}`. The bat0 netdev is
+// materialized by the kernel only once the batman-adv module is loaded and a
+// hard interface with a real device is enslaved to it, so its presence is the
+// signal that the routing layer actually came up — distinct from a `proto
+// batadv` interface that is merely configured. An absent device (rpcd returns
+// an error) is reported as a clean (false, nil) "not up" so ApplyProfile
+// degrades to the direct lan bridge rather than stranding the mesh on a bat0
+// that never instantiated.
 type UbusBatmanInspector struct {
 	Ubus ubus.Client
 }
 
-// interfaceDump mirrors the fields of `network.interface dump` this check needs;
-// the response carries more that we ignore.
-type interfaceDump struct {
-	Interface []struct {
-		Interface string `json:"interface"`
-		Up        bool   `json:"up"`
-	} `json:"interface"`
+// deviceStatus mirrors the fields of `network.device status` this check needs.
+type deviceStatus struct {
+	Up      bool `json:"up"`
+	Present bool `json:"present"`
 }
 
 func (i UbusBatmanInspector) BatmanUp(ctx context.Context, iface string) (bool, error) {
-	var dump interfaceDump
-	if err := i.Ubus.Call(ctx, "network.interface", "dump", nil, &dump); err != nil {
-		return false, err
+	var st deviceStatus
+	if err := i.Ubus.Call(ctx, "network.device", "status", map[string]string{"name": iface}, &st); err != nil {
+		// netifd has no such device (the common "batman not up" case: module or
+		// proto absent, or no hardif attached). Treat any failure to confirm the
+		// device as not-up; the apply-time poll retries, so a transient blip
+		// self-corrects.
+		return false, nil
 	}
-	for _, in := range dump.Interface {
-		if in.Interface == iface {
-			return in.Up, nil
-		}
-	}
-	// The interface isn't present: netifd never instantiated bat0 (no batman-adv
-	// module/proto), so the routing layer is not up — degrade to the lan bridge.
-	return false, nil
+	return st.Up || st.Present, nil
 }
