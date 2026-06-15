@@ -429,3 +429,102 @@ func contains(xs []string, want string) bool {
 	}
 	return false
 }
+
+// fakeBatman is an injectable BatmanInspector reporting a fixed bat0 up/down.
+type fakeBatman struct {
+	up  bool
+	err error
+}
+
+func (f fakeBatman) BatmanUp(ctx context.Context, iface string) (bool, error) {
+	return f.up, f.err
+}
+
+// With batman enabled, the 802.11s mesh must attach to a batadv hard interface
+// (so batman-adv forwards multi-hop) rather than bridge straight onto lan, and
+// the bat0 soft interface must be authored.
+func TestApplyProfileBatmanWiresMeshToHardif(t *testing.T) {
+	fake := &fakeUCI{}
+	m := NewManager(nil, fake, Config{
+		Radio:        "radio0",
+		BatmanEnable: true,
+		LanDevice:    "@device[0]",
+		Mesh:         fakeMesh{up: true},
+		Batman:       fakeBatman{up: true},
+	})
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm", MeshKey: "secret123"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+
+	mesh := fake.sections["omm_mesh"]
+	if mesh["network"] == "lan" || mesh["network"] == "" {
+		t.Fatalf("omm_mesh.network = %q, want a batadv hardif", mesh["network"])
+	}
+	bat0 := fake.sections["bat0"]
+	if bat0["proto"] != "batadv" {
+		t.Errorf("bat0 proto = %q, want batadv", bat0["proto"])
+	}
+	hardif := fake.sections[mesh["network"]]
+	if hardif["proto"] != "batadv_hardif" || hardif["master"] != "bat0" {
+		t.Errorf("mesh hardif %q = %v, want batadv_hardif master bat0", mesh["network"], hardif)
+	}
+}
+
+// With batman disabled (the zero-value Config default), behaviour is unchanged:
+// the mesh bridges directly onto lan and no bat0 is authored.
+func TestApplyProfileBatmanDisabledKeepsLanBridge(t *testing.T) {
+	fake := &fakeUCI{}
+	m := NewManager(nil, fake, Config{Radio: "radio0"})
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	if fake.sections["omm_mesh"]["network"] != "lan" {
+		t.Errorf("omm_mesh.network = %q, want lan", fake.sections["omm_mesh"]["network"])
+	}
+	if _, ok := fake.sections["bat0"]; ok {
+		t.Error("bat0 authored while batman disabled")
+	}
+}
+
+// When batman is enabled but bat0 does not come up (module/proto absent), meshd
+// must fall back to bridging the mesh directly onto lan and tear bat0 down —
+// rather than wrongly degrading the (working) mesh.
+func TestApplyProfileBatmanDownFallsBackToLanBridge(t *testing.T) {
+	fake := &fakeUCI{}
+	store := newStore(t)
+	m := NewManager(store, fake, Config{
+		Radio:              "radio0",
+		BatmanEnable:       true,
+		LanDevice:          "@device[0]",
+		Mesh:               fakeMesh{up: true},
+		Batman:             fakeBatman{up: false},
+		MeshVerifyInterval: time.Nanosecond,
+	})
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+
+	if fake.sections["omm_mesh"]["network"] != "lan" {
+		t.Errorf("after batman-down fallback, omm_mesh.network = %q, want lan", fake.sections["omm_mesh"]["network"])
+	}
+	deleted := false
+	for _, s := range fake.deleted {
+		if s == "bat0" {
+			deleted = true
+		}
+	}
+	if !deleted {
+		t.Errorf("bat0 not torn down on batman-down fallback; deleted = %v", fake.deleted)
+	}
+	// The mesh itself is up, so the backhaul mode stays 802.11s (not degraded).
+	state, err := store.GetBackhaulState(context.Background())
+	if err != nil {
+		t.Fatalf("GetBackhaulState: %v", err)
+	}
+	if state.Mode != models.BackhaulMode80211s {
+		t.Errorf("backhaul mode = %q, want %q", state.Mode, models.BackhaulMode80211s)
+	}
+}

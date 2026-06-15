@@ -66,8 +66,11 @@ Get a mesh-capable `wpad` onto each mesh device one of three ways:
     PACKAGES="meshd luci-app-meshd -wpad-basic-mbedtls wpad-mesh-mbedtls"
   ```
   (Match your image's crypto backend: `-mbedtls`/`-wolfssl`/`-openssl`. The
-  leading `-` drops the default basic variant it conflicts with.) Optional for
-  multi-hop/topology: add `kmod-batman-adv batctl`.
+  leading `-` drops the default basic variant it conflicts with.) For multi-hop
+  routing add the batman-adv stack: `kmod-batman-adv` (kernel module),
+  `batman-adv` (the netifd `batadv`/`batadv_hardif` protocol handlers meshd
+  authors) and `batctl` (topology reads). Without these meshd falls back to
+  bridging the mesh directly onto `lan` (single-hop only).
 
 - **On a live device** (online — e.g. a controller, or a node after it has
   joined the home LAN): `scripts/deploy.sh <host> --install-wpad-mesh` detects

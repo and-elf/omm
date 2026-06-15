@@ -78,15 +78,43 @@ wired uplink** — e.g. a garage AP reached only over the air — and the only t
 that supports:
 
 * **Wireless backhaul** — a node joins the network with no ethernet run.
-* **Chained nodes** — multi-hop paths (node → node → gateway) via 802.11s HWMP.
+* **Chained nodes** — multi-hop paths (node → node → gateway).
 * **Node mobility** — a relocated node re-attaches over the air.
 
-> Multi-hop reliability and the topology view (`batctl`) assume **batman-adv**
-> layered on the mesh interface. That layer is documented in
-> [architecture.md](architecture.md) but not yet authored by `ApplyProfile`
-> (today the mesh interface is bridged directly onto `lan`), so chaining beyond
-> a single hop is not yet guaranteed. Single-hop wireless backhaul (house →
-> garage) works with 802.11s alone.
+#### batman-adv routing layer
+
+When batman-adv is enabled (`MESHD_BATMAN`, default on where the kernel module
+is present), `ApplyProfile` does **not** bridge the mesh interface straight onto
+`lan`. Instead it authors a batman-adv mesh and bridges that:
+
+* A **soft interface** `bat0` (`proto 'batadv'`) with **bridge-loop-avoidance**
+  on. BLA is what lets a node carry *both* a wired link and the wireless mesh at
+  once without a broadcast storm — batman detects the redundant L2 path and
+  dedups it, where plain bridge STP could not (the consumer switches in the home
+  kit do not forward STP BPDUs across the wired path).
+* One **hard interface** (`proto 'batadv_hardif'`, `master 'bat0'`) per backhaul
+  link enslaved to the mesh: the 802.11s `omm_mesh` vif **and** every configured
+  wired backhaul port (`MESHD_BATMAN_PORTS`). batman-adv treats wired and
+  wireless links uniformly and computes the best loop-free path across the mix.
+* `bat0` is the only batman device bridged into `br-lan`; DHCP and clients ride
+  on top of it.
+
+Because batman-adv forwards at layer 2.5 across *any* mix of enslaved links, a
+node need not distinguish "edge" from "relay": a wired node automatically keeps
+relaying for a wireless child, and a chain like
+
+```text
+controller ──wired──▶ AP ──wireless──▶ AP ──wired──▶ device
+```
+
+is just a route batman-adv selects. This supersedes the per-node
+"disable the mesh while my own wire is up" failover (a workaround for the
+bridge loop), which is **not used** when batman-adv is active.
+
+> Without batman-adv (module absent, or `MESHD_BATMAN=0`) the mesh interface is
+> bridged directly onto `lan` as before: single-hop wireless backhaul (house →
+> garage) works, but multi-hop chaining and simultaneous wired+wireless on one
+> node are not guaranteed.
 
 ### Tier 2 — wired multi-AP (degraded)
 
@@ -119,10 +147,12 @@ with a reason and remediation. The outcome is persisted and surfaced:
   reason and the `wpad-mesh` remediation; degraded nodes are marked in the graph.
 
 > **Status.** Implemented: the apply-time verification, automatic degrade,
-> `/status` backhaul, and per-node `mesh_mode` in topology + LuCI. Still
-> follow-up: declaring/installing a mesh-capable `wpad` from the package, and the
-> batman-adv multi-hop layer (today the mesh is bridged directly onto `lan`, so
-> chaining beyond a single hop is not yet guaranteed).
+> `/status` backhaul, per-node `mesh_mode` in topology + LuCI, and the
+> **batman-adv routing layer** (`bat0` soft interface with bridge-loop-avoidance,
+> a hard interface per wireless/wired backhaul link, `bat0` bridged into
+> `br-lan`) authored by `ApplyProfile` when enabled. Still follow-up:
+> declaring/installing a mesh-capable `wpad` from the package, and live
+> multi-hop validation on the home kit.
 
 ---
 

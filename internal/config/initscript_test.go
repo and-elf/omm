@@ -36,3 +36,29 @@ func TestInitScriptExportsControllerURLAsJoin(t *testing.T) {
 		t.Errorf("meshd.init exports dead MESHD_CONTROLLER; the daemon reads MESHD_JOIN")
 	}
 }
+
+// The batman-adv routing options must reach the daemon: the init script reads
+// the UCI options and exports them under the MESHD_BATMAN* names Load() reads.
+// Same failure mode as the controller_url bug — an unexported option is silently
+// dropped and batman would never be configurable on-device.
+func TestInitScriptExportsBatmanOptions(t *testing.T) {
+	const initPath = "../../package/meshd/files/meshd.init"
+	b, err := os.ReadFile(initPath)
+	if err != nil {
+		t.Fatalf("read init script: %v", err)
+	}
+	init := string(b)
+
+	for env, uci := range map[string]string{
+		"MESHD_BATMAN":              "batman",
+		"MESHD_BATMAN_PORTS":        "batman_ports",
+		"MESHD_BATMAN_ROUTING_ALGO": "batman_routing_algo",
+	} {
+		if !regexp.MustCompile(env + `="\$` + uci + `"`).MatchString(init) {
+			t.Errorf("meshd.init must export %s=\"$%s\"; it does not", env, uci)
+		}
+		if !regexp.MustCompile(`config_get ` + uci + ` main ` + uci).MatchString(init) {
+			t.Errorf("meshd.init must read UCI option %q via config_get; it does not", uci)
+		}
+	}
+}

@@ -39,6 +39,9 @@ start_service() {
 	config_get manage_network main manage_network 0
 	config_get uplink_port main uplink_port ""
 	config_get lan_device main lan_device "@device[0]"
+	config_get batman main batman 1
+	config_get batman_ports main batman_ports ""
+	config_get batman_routing_algo main batman_routing_algo BATMAN_IV
 
 	procd_open_instance
 	procd_set_param command /usr/bin/meshd
@@ -66,7 +69,10 @@ start_service() {
 		MESHD_ONBOARD_GRACE="$onboard_grace" \
 		MESHD_MANAGE_NETWORK="$manage_network" \
 		MESHD_UPLINK_PORT="$uplink_port" \
-		MESHD_LAN_DEVICE="$lan_device"
+		MESHD_LAN_DEVICE="$lan_device" \
+		MESHD_BATMAN="$batman" \
+		MESHD_BATMAN_PORTS="$batman_ports" \
+		MESHD_BATMAN_ROUTING_ALGO="$batman_routing_algo"
 	procd_set_param respawn
 	procd_set_param stdout 1
 	procd_set_param stderr 1

@@ -140,6 +140,16 @@ func main() {
 		Radio:     cfg.SetupAPRadio,
 		MeshRadio: cfg.MeshRadio,
 		Mesh:      profiles.UbusMeshInspector{Ubus: ubusClient},
+		// batman-adv routing layer: author bat0 + a hard interface per backhaul
+		// link and wire the 802.11s mesh onto it (loop-free multi-hop across
+		// wired+wireless), degrading to the direct lan bridge when bat0 doesn't
+		// come up. LanDevice is the LAN bridge bat0 is bridged into.
+		BatmanEnable:      cfg.BatmanEnable,
+		BatmanIface:       cfg.BatmanIface,
+		BatmanRoutingAlgo: cfg.BatmanRoutingAlgo,
+		BatmanPorts:       cfg.BatmanPorts,
+		LanDevice:         cfg.LanDevice,
+		Batman:            profiles.UbusBatmanInspector{Ubus: ubusClient},
 	})
 
 	// Network posture: keep the node's network/dhcp/firewall aligned with its
@@ -359,7 +369,7 @@ func main() {
 		go syncProfileLoop(ctx, cfg.Join, meshClients, store, profileManager, 30*time.Second)
 		// Keep ethernet prioritized: the 802.11s mesh is a standby that activates
 		// only when the wired uplink loses carrier.
-		startBackhaulFailover(ctx, uciClient, cfg.BackhaulIface)
+		startBackhaulFailover(ctx, uciClient, cfg.BackhaulIface, cfg.BatmanEnable)
 	}
 
 	// Bring up the first-boot setup AP while the device is unclaimed, so a
@@ -529,7 +539,17 @@ func autoSelectHome(ctx context.Context, store storage.Store, pm profiles.Profil
 // uplink port — leaving existing single-backhaul deployments unchanged. The
 // actuator no-ops when no mesh iface is configured (a degraded multi-AP node has
 // nothing to fail over to).
-func startBackhaulFailover(ctx context.Context, uciClient uci.Client, backhaulIface string) {
+//
+// When batman-adv is the routing layer the carrier toggle is disabled entirely:
+// the mesh is a batadv hard interface, not a br-lan member, and batman's
+// bridge-loop-avoidance dedups the redundant wired+wireless path — so the mesh
+// must stay up as a standby batman link rather than be torn down by carrier, and
+// path selection between wire and air is batman's job, not this loop's.
+func startBackhaulFailover(ctx context.Context, uciClient uci.Client, backhaulIface string, batmanEnabled bool) {
+	if batmanEnabled {
+		log.Printf("backhaul: batman-adv active; carrier-toggle failover disabled (batman handles path selection + loop avoidance)")
+		return
+	}
 	if backhaulIface == "" || backhaulIface == "br-lan" {
 		return
 	}
@@ -718,7 +738,7 @@ func autoOnboardWired(ctx context.Context, store storage.Store, collector *topol
 		// Pull profile updates from the controller and re-apply on change.
 		go syncProfileLoop(ctx, []string{controllerURL}, clients, store, pm, 30*time.Second)
 		// Keep ethernet prioritized once joined; the mesh stands by for failover.
-		startBackhaulFailover(ctx, uciClient, cfg.BackhaulIface)
+		startBackhaulFailover(ctx, uciClient, cfg.BackhaulIface, cfg.BatmanEnable)
 		if afterJoin != nil {
 			afterJoin()
 		}

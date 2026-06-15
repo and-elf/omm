@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/and-elf/omm/internal/batman"
 	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/storage"
 	"github.com/and-elf/omm/internal/uci"
@@ -53,6 +54,16 @@ type MeshInspector interface {
 	MeshUp(ctx context.Context, section string) (bool, error)
 }
 
+// BatmanInspector reports whether the batman-adv soft interface (bat0) actually
+// came up after the network was reloaded. ApplyProfile uses it to decide whether
+// to wire the 802.11s mesh onto a batadv hard interface (multi-hop routing) or
+// fall back to bridging it directly onto lan when the batman-adv module/proto is
+// absent. Injected so the manager is testable off-OpenWrt; nil means "cannot
+// verify, assume up".
+type BatmanInspector interface {
+	BatmanUp(ctx context.Context, iface string) (bool, error)
+}
+
 type ProfileManager interface {
 	ApplyProfile(ctx context.Context, profile models.Profile) error
 	ApplyProfileForHome(ctx context.Context, homeID string) error
@@ -86,9 +97,31 @@ type Config struct {
 	// MeshVerifyAttempts/Interval bound how long to wait for the mesh vif to
 	// instantiate before concluding it failed — a mesh point takes a few seconds
 	// to come up after a wireless reload, so a single immediate check would
-	// wrongly degrade. Defaults: 8 attempts, 1s apart (~8s).
+	// wrongly degrade. Defaults: 8 attempts, 1s apart (~8s). The same bound is
+	// reused to wait for the batman soft interface.
 	MeshVerifyAttempts int
 	MeshVerifyInterval time.Duration
+
+	// BatmanEnable authors a batman-adv routing layer (bat0 + a hard interface per
+	// backhaul link) and wires the 802.11s mesh onto it, instead of bridging the
+	// mesh straight onto lan — giving loop-free multi-hop forwarding across wired
+	// and wireless links. It auto-degrades to the direct lan bridge when bat0 does
+	// not come up (module/proto absent). Off by the zero value, so unit tests and
+	// callers that don't opt in keep the prior single-hop behaviour.
+	BatmanEnable bool
+	// BatmanIface is the batman soft interface/netdev name (default "bat0").
+	BatmanIface string
+	// BatmanRoutingAlgo selects batman-adv's metric (default "BATMAN_IV").
+	BatmanRoutingAlgo string
+	// BatmanPorts are wired backhaul ethernet devices to enslave to bat0 as hard
+	// interfaces (board-specific), so a wired hop is routed by batman-adv too.
+	BatmanPorts []string
+	// LanDevice is the UCI section of the LAN bridge device bat0 is bridged into
+	// (e.g. "@device[0]"). Empty skips bridging bat0 into the LAN.
+	LanDevice string
+	// Batman verifies the bat0 soft interface came up after apply, gating the
+	// mesh-on-batman vs mesh-on-lan decision. nil disables verification (assume up).
+	Batman BatmanInspector
 }
 
 func (c Config) withDefaults() Config {
@@ -100,6 +133,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MeshVerifyInterval == 0 {
 		c.MeshVerifyInterval = time.Second
+	}
+	if c.BatmanIface == "" {
+		c.BatmanIface = "bat0"
+	}
+	if c.BatmanRoutingAlgo == "" {
+		c.BatmanRoutingAlgo = "BATMAN_IV"
 	}
 	return c
 }
@@ -148,6 +187,47 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 		meshRadio = m.cfg.MeshRadio
 	}
 
+	// batman-adv routing layer: when enabled, the 802.11s mesh attaches to a
+	// batadv hard interface (so batman-adv forwards loop-free, multi-hop across
+	// any mix of wired and wireless links) instead of bridging straight onto lan.
+	// It is authored before the wireless so we can verify bat0 actually came up
+	// and wire the mesh accordingly — degrading to the direct lan bridge when the
+	// batman-adv module/proto is absent, rather than stranding the mesh on a dead
+	// hard interface.
+	meshNetwork := "lan"
+	var bm *batman.Manager
+	if m.cfg.BatmanEnable && profile.MeshSSID != "" {
+		bm = batman.NewManager(m.uciClient, batman.Config{
+			Iface:       m.cfg.BatmanIface,
+			RoutingAlgo: m.cfg.BatmanRoutingAlgo,
+			WiredPorts:  m.cfg.BatmanPorts,
+			LanDevice:   m.cfg.LanDevice,
+		})
+		if err := bm.Apply(ctx); err != nil {
+			return fmt.Errorf("author batman-adv: %w", err)
+		}
+		if err := m.uciClient.Commit(ctx, "network"); err != nil {
+			return fmt.Errorf("commit network: %w", err)
+		}
+		if err := m.uciClient.Reload(ctx); err != nil {
+			return fmt.Errorf("reload after batman: %w", err)
+		}
+		if m.batmanUp(ctx) {
+			meshNetwork = bm.MeshHardif()
+		} else {
+			log.Printf("backhaul: batman-adv did not come up; bridging mesh onto lan directly")
+			if err := bm.Teardown(ctx); err != nil {
+				return fmt.Errorf("tear down batman-adv: %w", err)
+			}
+			if err := m.uciClient.Commit(ctx, "network"); err != nil {
+				return fmt.Errorf("commit network after batman teardown: %w", err)
+			}
+			if err := m.uciClient.Reload(ctx); err != nil {
+				return fmt.Errorf("reload after batman teardown: %w", err)
+			}
+		}
+	}
+
 	// Radios to enable at the end (a fresh OpenWrt radio ships disabled; enable
 	// it or its interfaces never start). Deduped so a shared radio is set once.
 	enable := map[string]bool{}
@@ -157,7 +237,7 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 			"device":  meshRadio,
 			"mode":    "mesh",
 			"mesh_id": profile.MeshSSID,
-			"network": "lan",
+			"network": meshNetwork,
 		}
 		// 802.11s authenticates with SAE; an empty key leaves the mesh open.
 		if profile.MeshKey != "" {
@@ -243,6 +323,30 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 	}
 
 	return nil
+}
+
+// batmanUp polls the batman inspector until the bat0 soft interface is up or the
+// verify window elapses. A nil inspector means "cannot verify": assume up rather
+// than tear down a possibly-working layer. A probe error is treated the same way
+// — the mesh verification downstream still catches a genuinely broken backhaul.
+func (m *Manager) batmanUp(ctx context.Context) bool {
+	if m.cfg.Batman == nil {
+		return true
+	}
+	for attempt := 0; attempt <= m.cfg.MeshVerifyAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(m.cfg.MeshVerifyInterval)
+		}
+		up, err := m.cfg.Batman.BatmanUp(ctx, m.cfg.BatmanIface)
+		if err != nil {
+			log.Printf("backhaul: batman verification failed, assuming up: %v", err)
+			return true
+		}
+		if up {
+			return true
+		}
+	}
+	return false
 }
 
 // verifyBackhaul determines the wireless-backhaul outcome after a profile is

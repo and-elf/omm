@@ -59,6 +59,25 @@ Not responsible for:
 * DHCP
 * Wireless drivers
 
+meshd **authors** the network config that wires these up but never forwards a
+packet itself: it sets the UCI/netifd sections and lets the kernel and daemons
+do the work.
+
+### batman-adv
+
+The mesh forwarding layer. meshd does not implement routing; it authors a
+batman-adv mesh via UCI/netifd (the `batadv` / `batadv_hardif` netifd protocols)
+and the kernel module does loop-free, multi-hop layer-2.5 forwarding:
+
+* A `bat0` **soft interface** with **bridge-loop-avoidance** on, bridged into
+  `br-lan`.
+* A **hard interface** per backhaul link — the 802.11s mesh vif and each wired
+  backhaul port — enslaved to `bat0`.
+
+Because batman-adv forwards across any mix of wired and wireless links, multi-hop
+chains and simultaneous wired+wireless backhaul on one node work without meshd
+arbitrating paths. See [network-model.md](network-model.md#batman-adv-routing-layer).
+
 ### LuCI Application
 
 Responsibilities:
