@@ -348,3 +348,46 @@ func TestDelListItemLastMemberClearsOption(t *testing.T) {
 		t.Fatalf("unexpected delete params: %#v", fake.lastParams)
 	}
 }
+
+// rpcd returns a single-option `uci get` as top-level {"value": ...}, not
+// {"values": {opt: ...}}. Get and the list helpers must handle that shape, or
+// every single-option read silently fails on those devices (the live bug behind
+// the stuck br-lan ports='bat0').
+func TestGetSingleOptionValueShape(t *testing.T) {
+	fake := &fakeUbusClient{response: map[string]interface{}{"value": "mesh"}}
+	client := &client{ubusClient: fake}
+
+	got, err := client.Get(context.Background(), "wireless", "omm_mesh", "mode")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != "mesh" {
+		t.Fatalf("Get = %q, want mesh", got)
+	}
+}
+
+func TestAddListItemReadsValueShape(t *testing.T) {
+	// Existing ports returned under "value" (single-option get). AddListItem must
+	// read them and append, not clobber the list with just the new member.
+	fake := &fakeUbusClient{response: map[string]interface{}{"value": []string{"lan1", "lan2"}}}
+	client := &client{ubusClient: fake}
+
+	if err := client.AddListItem(context.Background(), "network", "@device[0]", "ports", "bat0"); err != nil {
+		t.Fatalf("AddListItem: %v", err)
+	}
+	if got := setValues(t, fake.lastParams); !reflect.DeepEqual(got, []string{"lan1", "lan2", "bat0"}) {
+		t.Fatalf("ports = %v, want [lan1 lan2 bat0] (did not read existing list)", got)
+	}
+}
+
+func TestDelListItemReadsValueShape(t *testing.T) {
+	fake := &fakeUbusClient{response: map[string]interface{}{"value": []string{"lan1", "bat0"}}}
+	client := &client{ubusClient: fake}
+
+	if err := client.DelListItem(context.Background(), "network", "@device[0]", "ports", "bat0"); err != nil {
+		t.Fatalf("DelListItem: %v", err)
+	}
+	if got := setValues(t, fake.lastParams); !reflect.DeepEqual(got, []string{"lan1"}) {
+		t.Fatalf("ports = %v, want [lan1]", got)
+	}
+}

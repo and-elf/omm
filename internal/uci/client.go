@@ -59,8 +59,23 @@ func (c *client) Close() error {
 	return c.ubusClient.Close()
 }
 
+// uciGetResult covers both rpcd `uci get` response shapes: a single-option get
+// returns the scalar/list under top-level "value", while a section get returns
+// every option under "values". Older notes assumed only the latter, so reads of
+// a single option silently failed on devices that use "value".
 type uciGetResult struct {
+	Value  json.RawMessage            `json:"value"`
 	Values map[string]json.RawMessage `json:"values"`
+}
+
+// raw returns the JSON value for option, preferring the single-option "value"
+// field and falling back to the per-option "values" map.
+func (r uciGetResult) raw(option string) (json.RawMessage, bool) {
+	if len(r.Value) > 0 {
+		return r.Value, true
+	}
+	v, ok := r.Values[option]
+	return v, ok
 }
 
 func (c *client) Get(ctx context.Context, packageName, section, option string) (string, error) {
@@ -77,7 +92,7 @@ func (c *client) Get(ctx context.Context, packageName, section, option string) (
 		return "", err
 	}
 
-	value, ok := result.Values[option]
+	value, ok := result.raw(option)
 	if !ok {
 		return "", fmt.Errorf("option %q not found", option)
 	}
@@ -205,7 +220,7 @@ func (c *client) getList(ctx context.Context, packageName, section, option strin
 	}, &result); err != nil {
 		return nil, err
 	}
-	raw, ok := result.Values[option]
+	raw, ok := result.raw(option)
 	if !ok {
 		return nil, nil
 	}
