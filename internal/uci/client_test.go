@@ -236,3 +236,95 @@ func TestReload(t *testing.T) {
 		t.Fatalf("dhcp reload event params = %#v, want %#v", fake.lastParams, want_params)
 	}
 }
+
+// AddListItem/DelListItem must not use the ubus uci `add_list`/`del_list`
+// methods: rpcd's uci object does not implement them ("Method not found" on the
+// live devices). They read the current list and write it back with `set` (whose
+// values may be an array), which every rpcd supports.
+func listResponse(items ...string) map[string]interface{} {
+	vals := make([]interface{}, len(items))
+	for i, it := range items {
+		vals[i] = it
+	}
+	return map[string]interface{}{"values": map[string]interface{}{"ports": vals}}
+}
+
+func setValues(t *testing.T, params interface{}) []string {
+	t.Helper()
+	m, ok := params.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected params map, got %T", params)
+	}
+	values, ok := m["values"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected values map, got %T", m["values"])
+	}
+	out, ok := values["ports"].([]string)
+	if !ok {
+		t.Fatalf("expected ports []string, got %T", values["ports"])
+	}
+	return out
+}
+
+func TestAddListItemAppendsViaSet(t *testing.T) {
+	fake := &fakeUbusClient{response: listResponse("lan1", "lan2")}
+	client := &client{ubusClient: fake}
+
+	if err := client.AddListItem(context.Background(), "network", "@device[0]", "ports", "bat0"); err != nil {
+		t.Fatalf("AddListItem: %v", err)
+	}
+	for _, c := range fake.calls {
+		if c.method == "add_list" || c.method == "del_list" {
+			t.Fatalf("used unsupported method %q", c.method)
+		}
+	}
+	if got := setValues(t, fake.lastParams); !reflect.DeepEqual(got, []string{"lan1", "lan2", "bat0"}) {
+		t.Fatalf("ports = %v, want [lan1 lan2 bat0]", got)
+	}
+}
+
+func TestAddListItemIdempotent(t *testing.T) {
+	fake := &fakeUbusClient{response: listResponse("lan1", "bat0")}
+	client := &client{ubusClient: fake}
+
+	if err := client.AddListItem(context.Background(), "network", "@device[0]", "ports", "bat0"); err != nil {
+		t.Fatalf("AddListItem: %v", err)
+	}
+	// Already present: read only, no write.
+	for _, c := range fake.calls {
+		if c.method == "set" {
+			t.Fatalf("AddListItem wrote despite item already present")
+		}
+	}
+}
+
+func TestDelListItemRemovesViaSet(t *testing.T) {
+	fake := &fakeUbusClient{response: listResponse("lan1", "bat0")}
+	client := &client{ubusClient: fake}
+
+	if err := client.DelListItem(context.Background(), "network", "@device[0]", "ports", "bat0"); err != nil {
+		t.Fatalf("DelListItem: %v", err)
+	}
+	for _, c := range fake.calls {
+		if c.method == "add_list" || c.method == "del_list" {
+			t.Fatalf("used unsupported method %q", c.method)
+		}
+	}
+	if got := setValues(t, fake.lastParams); !reflect.DeepEqual(got, []string{"lan1"}) {
+		t.Fatalf("ports = %v, want [lan1]", got)
+	}
+}
+
+func TestDelListItemAbsentNoOp(t *testing.T) {
+	fake := &fakeUbusClient{response: listResponse("lan1", "lan2")}
+	client := &client{ubusClient: fake}
+
+	if err := client.DelListItem(context.Background(), "network", "@device[0]", "ports", "bat0"); err != nil {
+		t.Fatalf("DelListItem: %v", err)
+	}
+	for _, c := range fake.calls {
+		if c.method == "set" {
+			t.Fatalf("DelListItem wrote despite item absent")
+		}
+	}
+}
