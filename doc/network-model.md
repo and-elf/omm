@@ -93,11 +93,46 @@ is present), `ApplyProfile` does **not** bridge the mesh interface straight onto
   dedups it, where plain bridge STP could not (the consumer switches in the home
   kit do not forward STP BPDUs across the wired path).
 * One **hard interface** (`proto 'batadv_hardif'`, `master 'bat0'`) per backhaul
-  link enslaved to the mesh: the 802.11s `omm_mesh` vif **and** every configured
-  wired backhaul port (`MESHD_BATMAN_PORTS`). batman-adv treats wired and
-  wireless links uniformly and computes the best loop-free path across the mix.
+  link enslaved to the mesh: the 802.11s `omm_mesh` vif **and** the node's wired
+  backhaul uplink. batman-adv treats wired and wireless links uniformly and
+  computes the best loop-free path across the mix.
 * `bat0` is the only batman device bridged into `br-lan`; DHCP and clients ride
   on top of it.
+
+**Auto backhaul detection.** A joined node does not need its backhaul port named
+in config. At startup it resolves the wired uplink (in priority order:
+`uplink_port` → the `network.wan.device` convention → a discrete `backhaul_iface`)
+and, if that device has carrier, **gates enslavement on whether a batman peer
+actually speaks on that wire** — a passive sniff for batman-adv OGM frames
+(ethertype `0x4305`), which does not enslave or transmit, so it is safe while the
+port is still a plain bridge member. This yields three cases:
+
+* **Wireless-only** (no cabled uplink): nothing enslaved; the mesh is the only
+  batman link.
+* **batman wired** (a cabled uplink *with* a batman peer on it — a dedicated
+  inter-node wired link): the uplink is enslaved to `bat0` and taken *out* of
+  `br-lan` (a device that is both a bridge member and a batadv hardif is the
+  redundant L2 path that storms). Client jacks stay normal `br-lan` ports. batman
+  then selects the wired path while the cable is up and re-routes over the mesh
+  within a second of a cable pull, preferring the wire again on replug — wired-
+  primary + wireless-backup + multi-hop, natively, no bridge loop.
+* **plain wired + standby mesh** (a cabled uplink with *no* batman peer — a node on
+  the controller's **shared client LAN**, where the controller does not run batman
+  on that switch port): the uplink stays a plain `br-lan` port (so it keeps L2
+  reach to the controller), and the 802.11s mesh is held as an **admin standby** —
+  the carrier-toggle failover enables it only on wire loss, so wired + mesh never
+  bridge-loop.
+
+> Why the gate: a batman hardif only carries traffic when the *other* end of the
+> wire also runs batman on it. Enslaving a wire whose far end is a plain switch
+> (the controller's client LAN) would silently kill that node's wired path and
+> force it onto wireless. The peer-on-wire sniff distinguishes a dedicated
+> inter-node link from a controller-LAN drop.
+
+> Resolution runs on **joined nodes only**. A controller's `wan` is its *internet*
+> uplink and must never be pulled into batman. `MESHD_BATMAN_PORTS` is an explicit
+> override for deliberate wiring (e.g. a controller's dedicated downstream wired
+> backhaul port) and, when set, enslaves those ports directly and skips resolution.
 
 Because batman-adv forwards at layer 2.5 across *any* mix of enslaved links, a
 node need not distinguish "edge" from "relay": a wired node automatically keeps

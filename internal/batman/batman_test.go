@@ -176,6 +176,64 @@ func TestApplyBridgesBat0IntoLan(t *testing.T) {
 	}
 }
 
+func TestApplyRemovesEnslavedWiredPortsFromLanBridge(t *testing.T) {
+	r := newRecordUCI()
+	// The LAN bridge starts with the uplink jack (wan) and a client jack (lan)
+	// as members — the dumb-AP layout where both ethernet jacks are bridged.
+	r.AddListItem(context.Background(), "network", "@device[0]", "ports", "lan")
+	r.AddListItem(context.Background(), "network", "@device[0]", "ports", "wan")
+
+	m := NewManager(r, Config{Iface: "bat0", LanDevice: "@device[0]", WiredPorts: []string{"wan"}})
+	if err := m.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	// The enslaved uplink must LEAVE br-lan — a device that is both a bridge
+	// member and a batadv hardif is the redundant L2 path that storms. The
+	// client jack stays a normal bridge port, and bat0 is added.
+	ports := r.lists["@device[0]"]["ports"]
+	has := map[string]bool{}
+	for _, p := range ports {
+		has[p] = true
+	}
+	if has["wan"] {
+		t.Errorf("enslaved uplink 'wan' still in br-lan ports %v; must leave the bridge", ports)
+	}
+	if !has["lan"] {
+		t.Errorf("client jack 'lan' missing from br-lan ports %v; clients must stay bridged", ports)
+	}
+	if !has["bat0"] {
+		t.Errorf("bat0 missing from br-lan ports %v", ports)
+	}
+}
+
+func TestTeardownRestoresWiredPortsToLanBridge(t *testing.T) {
+	r := newRecordUCI()
+	r.AddListItem(context.Background(), "network", "@device[0]", "ports", "lan")
+	r.AddListItem(context.Background(), "network", "@device[0]", "ports", "wan")
+
+	m := NewManager(r, Config{Iface: "bat0", LanDevice: "@device[0]", WiredPorts: []string{"wan"}})
+	if err := m.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if err := m.Teardown(context.Background()); err != nil {
+		t.Fatalf("Teardown: %v", err)
+	}
+
+	// Degrading back to a direct lan bridge must hand the uplink back to br-lan
+	// so the node keeps its wired connectivity, with no duplicate entry.
+	ports := r.lists["@device[0]"]["ports"]
+	count := 0
+	for _, p := range ports {
+		if p == "wan" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("after teardown, 'wan' appears %d times in br-lan ports %v, want exactly 1", count, ports)
+	}
+}
+
 func TestApplyIsIdempotent(t *testing.T) {
 	r := newRecordUCI()
 	m := NewManager(r, Config{Iface: "bat0", LanDevice: "@device[0]", WiredPorts: []string{"eth0"}})
@@ -217,9 +275,10 @@ func TestTeardownRemovesSections(t *testing.T) {
 	}
 
 	// bat0 must be unbridged from br-lan and its sections removed, so a degrade to
-	// direct-bridge re-sets cleanly.
-	if ports := r.lists["@device[0]"]["ports"]; len(ports) != 0 {
-		t.Errorf("after teardown, br-lan ports = %v, want empty", ports)
+	// direct-bridge re-sets cleanly — while the enslaved uplink is handed back to
+	// br-lan so the node keeps wired connectivity without batman.
+	if ports := r.lists["@device[0]"]["ports"]; len(ports) != 1 || ports[0] != "eth0" {
+		t.Errorf("after teardown, br-lan ports = %v, want [eth0] (bat0 gone, uplink restored)", ports)
 	}
 	for _, section := range []string{"bat0", m.MeshHardif(), m.WiredHardif("eth0")} {
 		if _, ok := r.opts[section]; ok {

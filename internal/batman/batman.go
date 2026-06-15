@@ -108,7 +108,10 @@ func (m *Manager) Apply(ctx context.Context) error {
 		return fmt.Errorf("author mesh hardif: %w", err)
 	}
 
-	// Wired backhaul hard interfaces: pin each ethernet device to bat0.
+	// Wired backhaul hard interfaces: pin each ethernet device to bat0, and take
+	// it OUT of the LAN bridge. A device that is both a br-lan member and a batadv
+	// hardif is the redundant wired+wireless L2 path that storms — the uplink must
+	// belong to batman exclusively, while client jacks stay normal bridge ports.
 	for _, port := range m.cfg.WiredPorts {
 		if err := m.uci.SetSection(ctx, "network", m.WiredHardif(port), "interface", map[string]string{
 			"proto":  "batadv_hardif",
@@ -116,6 +119,11 @@ func (m *Manager) Apply(ctx context.Context) error {
 			"device": port,
 		}); err != nil {
 			return fmt.Errorf("author wired hardif %s: %w", port, err)
+		}
+		if m.cfg.LanDevice != "" {
+			if err := m.uci.DelListItem(ctx, "network", m.cfg.LanDevice, "ports", port); err != nil {
+				return fmt.Errorf("remove enslaved %s from lan bridge: %w", port, err)
+			}
 		}
 	}
 
@@ -139,6 +147,16 @@ func (m *Manager) Teardown(ctx context.Context) error {
 	if m.cfg.LanDevice != "" {
 		if err := m.uci.DelListItem(ctx, "network", m.cfg.LanDevice, "ports", m.cfg.Iface); err != nil {
 			return fmt.Errorf("unbridge %s from lan: %w", m.cfg.Iface, err)
+		}
+		// Hand each enslaved uplink back to br-lan so the node keeps its wired
+		// connectivity once batman is gone. del-then-add keeps it to one entry.
+		for _, port := range m.cfg.WiredPorts {
+			if err := m.uci.DelListItem(ctx, "network", m.cfg.LanDevice, "ports", port); err != nil {
+				return fmt.Errorf("clear stale %s lan port: %w", port, err)
+			}
+			if err := m.uci.AddListItem(ctx, "network", m.cfg.LanDevice, "ports", port); err != nil {
+				return fmt.Errorf("restore %s to lan bridge: %w", port, err)
+			}
 		}
 	}
 	sections := []string{m.MeshHardif()}

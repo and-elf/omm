@@ -114,8 +114,18 @@ type Config struct {
 	// BatmanRoutingAlgo selects batman-adv's metric (default "BATMAN_IV").
 	BatmanRoutingAlgo string
 	// BatmanPorts are wired backhaul ethernet devices to enslave to bat0 as hard
-	// interfaces (board-specific), so a wired hop is routed by batman-adv too.
+	// interfaces, so a wired hop is routed by batman-adv too. The daemon resolves
+	// these once at startup (batman.ResolveBackhaul: the wired uplink, gated on a
+	// batman peer being present on that wire) and passes the result here; an
+	// explicit operator config also lands here. Empty means no wired batman link.
 	BatmanPorts []string
+	// MeshStandby keeps the 802.11s mesh an admin standby (authored disabled) under
+	// batman instead of an always-on hardif. It is set for a node whose wired
+	// uplink is NOT enslaved to batman (a node on the controller's shared LAN,
+	// where the wire stays plain-bridged): the carrier-toggle failover then enables
+	// the mesh only on wire loss, so wired + mesh never bridge-loop. Off (always-on
+	// mesh) when the wire is a batman hardif or there is no wired uplink.
+	MeshStandby bool
 	// LanDevice is the UCI section of the LAN bridge device bat0 is bridged into
 	// (e.g. "@device[0]"). Empty skips bridging bat0 into the LAN.
 	LanDevice string
@@ -219,6 +229,20 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 			"mode":    "mesh",
 			"mesh_id": profile.MeshSSID,
 			"network": meshNetwork,
+		}
+		// Decide the mesh's enabled state under batman. When the wire is a batman
+		// hardif (or there is no wire), the mesh is an always-on hardif — BLA owns
+		// loop avoidance — so clear any stale disabled='1' a prior failover left.
+		// In MeshStandby (the wire stays plain-bridged), author it disabled: the
+		// carrier-toggle failover enables it only on wire loss, so wired + mesh
+		// never bridge-loop. Without batman, leave disabled untouched — the failover
+		// owns it there too.
+		if bm != nil {
+			if m.cfg.MeshStandby {
+				mesh["disabled"] = "1"
+			} else {
+				mesh["disabled"] = "0"
+			}
 		}
 		// 802.11s authenticates with SAE; an empty key leaves the mesh open.
 		if profile.MeshKey != "" {
@@ -382,6 +406,13 @@ func (m *Manager) verifyBackhaul(ctx context.Context, profile models.Profile) (m
 	// No mesh configured: the node is a wired multi-AP by choice, not a degrade.
 	if profile.MeshSSID == "" {
 		return models.BackhaulState{Mode: models.BackhaulModeMultiAP}, nil
+	}
+	// Standby mesh (batman case 3): the 802.11s mesh is intentionally authored
+	// disabled and comes up only on wire loss via the failover. "Mesh not up now"
+	// is therefore expected, NOT a failure to start — do not poll it and do not
+	// delete the section (that would destroy the very backup the failover enables).
+	if m.cfg.MeshStandby {
+		return models.BackhaulState{Mode: models.BackhaulMode80211s}, nil
 	}
 	// Cannot verify (no inspector, or the probe failed): assume the configured
 	// mesh is in effect rather than tear down a possibly-working backhaul.

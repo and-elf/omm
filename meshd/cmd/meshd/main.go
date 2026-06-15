@@ -18,6 +18,7 @@ import (
 
 	"github.com/and-elf/omm/internal/api"
 	"github.com/and-elf/omm/internal/backhaul"
+	"github.com/and-elf/omm/internal/batman"
 	"github.com/and-elf/omm/internal/client"
 	"github.com/and-elf/omm/internal/config"
 	"github.com/and-elf/omm/internal/deviceled"
@@ -136,6 +137,40 @@ func main() {
 		log.Printf("check home profile: %v", err)
 	}
 
+	// Auto backhaul detection (joined nodes only). Resolve once at startup how this
+	// node wires its backhaul: find the wired uplink (uplink_port > the
+	// network.wan.device convention > a discrete backhaul_iface), confirm it has
+	// carrier, and GATE enslavement on a batman peer actually speaking on that wire
+	// (a passive batadv-OGM sniff). A dedicated inter-node wired link (peer present)
+	// is enslaved to bat0; a node on the controller's shared LAN (no batman on the
+	// wire) keeps the wire plain-bridged and runs the carrier-toggle failover with
+	// the mesh as a standby. A controller (not joined) keeps its explicit
+	// batman_ports — its `wan` is the internet uplink and is never auto-enslaved.
+	backhaulPlan := batman.BackhaulPlan{WiredPorts: cfg.BatmanPorts}
+	if cfg.BatmanEnable && len(cfg.Join) > 0 && len(cfg.BatmanPorts) == 0 {
+		var sources []func(ctx context.Context) (string, error)
+		if cfg.UplinkPort != "" {
+			sources = append(sources, staticDevice(cfg.UplinkPort))
+		}
+		sources = append(sources, wanDevice(uciClient))
+		if cfg.BackhaulIface != "" && cfg.BackhaulIface != "br-lan" {
+			sources = append(sources, staticDevice(cfg.BackhaulIface))
+		}
+		if plan, err := batman.ResolveBackhaul(ctx, batman.BackhaulConfig{
+			Sources:    sources,
+			HasCarrier: batman.SysfsCarrier(nil),
+			PeerOnWire: func(ctx context.Context, dev string) (bool, error) {
+				return batman.SniffBatadvPeer(ctx, dev, 6*time.Second)
+			},
+		}); err != nil {
+			log.Printf("backhaul: resolve failed, leaving wired uplink plain-bridged: %v", err)
+		} else {
+			backhaulPlan = plan
+			log.Printf("backhaul: resolved wired_ports=%v failover_iface=%q mesh_standby=%v",
+				plan.WiredPorts, plan.FailoverIface, plan.MeshStandby)
+		}
+	}
+
 	profileManager := profiles.NewManager(store, uciClient, profiles.Config{
 		Radio:     cfg.SetupAPRadio,
 		MeshRadio: cfg.MeshRadio,
@@ -147,7 +182,8 @@ func main() {
 		BatmanEnable:      cfg.BatmanEnable,
 		BatmanIface:       cfg.BatmanIface,
 		BatmanRoutingAlgo: cfg.BatmanRoutingAlgo,
-		BatmanPorts:       cfg.BatmanPorts,
+		BatmanPorts:       backhaulPlan.WiredPorts,
+		MeshStandby:       backhaulPlan.MeshStandby,
 		LanDevice:         cfg.LanDevice,
 		Batman:            profiles.UbusBatmanInspector{Ubus: ubusClient},
 	})
@@ -368,8 +404,10 @@ func main() {
 		// Pull profile updates from the joined controller(s) and re-apply on change.
 		go syncProfileLoop(ctx, cfg.Join, meshClients, store, profileManager, 30*time.Second)
 		// Keep ethernet prioritized: the 802.11s mesh is a standby that activates
-		// only when the wired uplink loses carrier.
-		startBackhaulFailover(ctx, uciClient, cfg.BackhaulIface, cfg.BatmanEnable)
+		// only when the wired uplink loses carrier. Driven by the resolved plan —
+		// non-empty only in case 3 (wire plain-bridged, no batman peer on it); a
+		// batman-enslaved wire (case 2) or wireless-only node (case 1) needs none.
+		startBackhaulFailover(ctx, uciClient, backhaulPlan.FailoverIface)
 	}
 
 	// Bring up the first-boot setup AP while the device is unclaimed, so a
@@ -526,30 +564,46 @@ func autoSelectHome(ctx context.Context, store storage.Store, pm profiles.Profil
 	}
 }
 
+// staticDevice is an uplink source that always yields a fixed device name (from
+// configuration like uplink_port or backhaul_iface).
+func staticDevice(dev string) func(ctx context.Context) (string, error) {
+	return func(context.Context) (string, error) { return dev, nil }
+}
+
+// wanDevice resolves the node's uplink device from network.wan — the `device`
+// option (modern OpenWrt), falling back to the legacy `ifname`. It returns ""
+// (no error) when neither is set, so a board with no `wan` section simply has no
+// wired backhaul to enslave. Used by the batman uplink detector.
+func wanDevice(uciClient uci.Client) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		if dev, err := uciClient.Get(ctx, "network", "wan", "device"); err == nil && strings.TrimSpace(dev) != "" {
+			return dev, nil
+		}
+		// Fall back to the legacy `ifname`; an absent `wan` section means the node
+		// has no wired uplink to enslave — reported as "" (not an error) so a normal
+		// dumb-AP layout doesn't log a detection failure on every apply.
+		if ifname, err := uciClient.Get(ctx, "network", "wan", "ifname"); err == nil {
+			return ifname, nil
+		}
+		return "", nil
+	}
+}
+
 // startBackhaulFailover launches the ethernet/wireless backhaul switcher for a
 // joined node: ethernet is always preferred, and the 802.11s mesh is a standby
 // that activates only when the wired uplink loses carrier (and is torn down when
 // the wire returns, which also avoids an ethernet+mesh bridging loop).
 //
-// backhaulIface is the wired uplink whose carrier is watched. It must be a
-// discrete uplink port (e.g. "eth0"/"wan"); the LAN bridge "br-lan" (the
-// default) is not — its carrier stays up from any bridge member, so it can't
-// signal "the wire to the controller is gone". Failover therefore stays off for
-// the default and engages only once an operator sets backhaul_iface to the real
-// uplink port — leaving existing single-backhaul deployments unchanged. The
-// actuator no-ops when no mesh iface is configured (a degraded multi-AP node has
-// nothing to fail over to).
-//
-// When batman-adv is the routing layer the carrier toggle is disabled entirely:
-// the mesh is a batadv hard interface, not a br-lan member, and batman's
-// bridge-loop-avoidance dedups the redundant wired+wireless path — so the mesh
-// must stay up as a standby batman link rather than be torn down by carrier, and
-// path selection between wire and air is batman's job, not this loop's.
-func startBackhaulFailover(ctx context.Context, uciClient uci.Client, backhaulIface string, batmanEnabled bool) {
-	if batmanEnabled {
-		log.Printf("backhaul: batman-adv active; carrier-toggle failover disabled (batman handles path selection + loop avoidance)")
-		return
-	}
+// failoverIface is the wired uplink whose carrier is watched — the
+// batman.ResolveBackhaul case-3 uplink (a node on the controller's shared LAN
+// whose wire stays plain-bridged) or, without batman, an operator's backhaul_iface.
+// It is "" when failover is not needed: a wireless-only node (case 1), or a node
+// whose wire IS a batman hardif (case 2) where batman + BLA own path selection and
+// the mesh stays up as a standby batman link. The LAN bridge "br-lan" is rejected —
+// its carrier stays up from any bridge member, so it can't signal "the wire to the
+// controller is gone". The actuator no-ops when no mesh iface is configured.
+func startBackhaulFailover(ctx context.Context, uciClient uci.Client, failoverIface string) {
+	backhaulIface := failoverIface
 	if backhaulIface == "" || backhaulIface == "br-lan" {
 		return
 	}
@@ -738,7 +792,9 @@ func autoOnboardWired(ctx context.Context, store storage.Store, collector *topol
 		// Pull profile updates from the controller and re-apply on change.
 		go syncProfileLoop(ctx, []string{controllerURL}, clients, store, pm, 30*time.Second)
 		// Keep ethernet prioritized once joined; the mesh stands by for failover.
-		startBackhaulFailover(ctx, uciClient, cfg.BackhaulIface, cfg.BatmanEnable)
+		// The wired auto-onboard path does not run the startup peer-on-wire
+		// resolution, so it uses the configured backhaul_iface directly.
+		startBackhaulFailover(ctx, uciClient, cfg.BackhaulIface)
 		if afterJoin != nil {
 			afterJoin()
 		}

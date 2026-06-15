@@ -17,7 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wizard. Network posture management (`manage_network`) stays opt-in.
 
 ### Added
-d- **batman-adv multi-hop routing.** meshd now authors a batman-adv mesh as the
+- **Auto backhaul detection.** A joined node now resolves its wired backhaul
+  uplink at startup (priority: `uplink_port` → `network.wan.device` → a discrete
+  `backhaul_iface`) and **gates batman enslavement on a batman peer actually being
+  present on that wire** — a passive batman-adv OGM sniff that neither enslaves nor
+  transmits. A dedicated inter-node wired link (peer present) is enslaved to
+  `bat0` and taken out of `br-lan`, giving wired-primary + wireless-backup +
+  multi-hop natively (batman re-routes over the mesh within a second of a cable
+  pull, no `backhaul_iface`, no carrier-toggle, no bridge loop). A node on the
+  controller's shared client LAN (no batman on the wire) keeps the uplink plain-
+  bridged and holds the mesh as an admin standby via the carrier-toggle failover,
+  so wired + mesh never loop. Without a cabled uplink the node is wireless-only.
+  Runs on joined nodes only — a controller's internet `wan` is never enslaved;
+  `batman_ports` is an explicit override that enslaves directly and skips
+  resolution.
+- **batman-adv multi-hop routing.** meshd now authors a batman-adv mesh as the
   forwarding layer instead of bridging the 802.11s mesh straight onto the LAN: a
   `bat0` soft interface with bridge-loop-avoidance, one batadv hard interface per
   backhaul link (the wireless mesh *and* each configured wired port,

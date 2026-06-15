@@ -476,6 +476,121 @@ func TestApplyProfileBatmanWiresMeshToHardif(t *testing.T) {
 	}
 }
 
+// In batman mode the 802.11s mesh is an always-enabled batman hardif (BLA owns
+// loop avoidance, there is no carrier-toggle failover to re-enable it), so
+// ApplyProfile must explicitly clear any stale disabled='1' left by a prior
+// failover — otherwise the wireless backup never comes up under batman.
+func TestApplyProfileBatmanEnablesMesh(t *testing.T) {
+	fake := &fakeUCI{}
+	m := NewManager(nil, fake, Config{
+		Radio:        "radio0",
+		BatmanEnable: true,
+		LanDevice:    "@device[0]",
+		Mesh:         fakeMesh{up: true},
+		Batman:       fakeBatman{up: true},
+	})
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm", MeshKey: "secret123"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	if got := fake.sections["omm_mesh"]["disabled"]; got != "0" {
+		t.Errorf("omm_mesh.disabled = %q, want 0 (batman mesh is an always-on hardif)", got)
+	}
+}
+
+// With batman disabled, ApplyProfile must NOT force the mesh enabled — the
+// carrier-toggle failover owns disabled there, and re-enabling the mesh on a
+// wired node would recreate the ethernet+mesh bridge loop.
+func TestApplyProfileNonBatmanLeavesMeshDisabledUnset(t *testing.T) {
+	fake := &fakeUCI{}
+	m := NewManager(nil, fake, Config{Radio: "radio0"})
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	if _, ok := fake.sections["omm_mesh"]["disabled"]; ok {
+		t.Errorf("omm_mesh.disabled was set without batman; failover must own it")
+	}
+}
+
+// ApplyProfile enslaves the configured batman ports (resolved by the daemon's
+// startup backhaul resolution) to bat0 as batadv hardifs.
+func TestApplyProfileBatmanEnslavesConfiguredPorts(t *testing.T) {
+	fake := &fakeUCI{}
+	m := NewManager(nil, fake, Config{
+		Radio:        "radio0",
+		BatmanEnable: true,
+		LanDevice:    "@device[0]",
+		Mesh:         fakeMesh{up: true},
+		Batman:       fakeBatman{up: true},
+		BatmanPorts:  []string{"wan"},
+	})
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	wired := fake.sections["bat0_wan"]
+	if wired["proto"] != "batadv_hardif" || wired["master"] != "bat0" || wired["device"] != "wan" {
+		t.Errorf("uplink hardif = %v, want batadv_hardif master bat0 device wan", wired)
+	}
+}
+
+// In MeshStandby (case 3: a node whose wired uplink stays plain-bridged), the
+// mesh is authored DISABLED even under batman — the carrier-toggle failover
+// enables it only on wire loss, so wired + mesh never bridge-loop.
+func TestApplyProfileBatmanMeshStandbyDisablesMesh(t *testing.T) {
+	fake := &fakeUCI{}
+	m := NewManager(nil, fake, Config{
+		Radio:        "radio0",
+		BatmanEnable: true,
+		LanDevice:    "@device[0]",
+		Mesh:         fakeMesh{up: true},
+		Batman:       fakeBatman{up: true},
+		MeshStandby:  true,
+	})
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	if got := fake.sections["omm_mesh"]["disabled"]; got != "1" {
+		t.Errorf("omm_mesh.disabled = %q, want 1 (mesh is an admin standby in case 3)", got)
+	}
+}
+
+// A standby mesh (case 3) is authored disabled on purpose, so verifyBackhaul
+// must NOT treat "mesh down" as a failed start: it must leave the omm_mesh
+// section intact (the failover enables it on wire loss) and report 802.11s, not
+// degrade to multi-AP.
+func TestApplyProfileMeshStandbyDoesNotDegrade(t *testing.T) {
+	fake := &fakeUCI{}
+	store := newStore(t)
+	m := NewManager(store, fake, Config{
+		Radio:              "radio0",
+		BatmanEnable:       true,
+		LanDevice:          "@device[0]",
+		Mesh:               fakeMesh{up: false}, // standby mesh reads as "not up"
+		Batman:             fakeBatman{up: true},
+		MeshStandby:        true,
+		MeshVerifyInterval: time.Nanosecond,
+	})
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	for _, s := range fake.deleted {
+		if s == meshSection {
+			t.Fatalf("omm_mesh deleted on a standby mesh; failover would have no backup")
+		}
+	}
+	state, err := store.GetBackhaulState(context.Background())
+	if err != nil {
+		t.Fatalf("GetBackhaulState: %v", err)
+	}
+	if state.Mode != models.BackhaulMode80211s {
+		t.Errorf("backhaul mode = %q, want %q (standby mesh is configured, not degraded)", state.Mode, models.BackhaulMode80211s)
+	}
+}
+
 // With batman disabled (the zero-value Config default), behaviour is unchanged:
 // the mesh bridges directly onto lan and no bat0 is authored.
 func TestApplyProfileBatmanDisabledKeepsLanBridge(t *testing.T) {

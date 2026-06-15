@@ -71,8 +71,12 @@ type Config struct {
 	// bat0 into the LAN, instead of bridging the 802.11s mesh straight onto lan —
 	// giving loop-free multi-hop forwarding across any mix of wired and wireless
 	// links. Default on; it auto-degrades to the direct mesh-on-lan bridge when
-	// the batman-adv module/netifd proto is absent. BatmanPorts are wired backhaul
-	// ethernet devices to enslave to bat0 (board-specific). See doc/network-model.md.
+	// the batman-adv module/netifd proto is absent. A joined node auto-detects its
+	// wired backhaul uplink (the `wan` jack toward the controller, when cabled) and
+	// enslaves only that to bat0, taking it out of br-lan; client jacks stay bridge
+	// ports. BatmanPorts (MESHD_BATMAN_PORTS) is an explicit override for deliberate
+	// wiring (e.g. a controller's downstream wired port, which auto-detection never
+	// touches). See doc/network-model.md.
 	BatmanEnable      bool
 	BatmanPorts       []string
 	BatmanRoutingAlgo string
