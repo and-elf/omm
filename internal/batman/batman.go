@@ -46,6 +46,11 @@ type Config struct {
 	// `ports` bat0 is added to (e.g. "@device[0]" or a named "br_lan"). Empty
 	// skips bridging — bat0 is authored but not joined to the LAN.
 	LanDevice string
+	// MAC reads a device's current MAC. When set, Apply assigns each enslaved
+	// wired port a unique locally-administered MAC (a `config device` section) so
+	// batman never sees two hardifs share a MAC on shared-MAC DSA hardware. nil
+	// skips it (fine on hardware whose ports already have distinct MACs).
+	MAC func(dev string) (string, error)
 }
 
 func (c Config) withDefaults() Config {
@@ -79,6 +84,12 @@ func (m *Manager) MeshHardif() string {
 // sanitized to a valid UCI section name (alnum/underscore only).
 func (m *Manager) WiredHardif(port string) string {
 	return m.cfg.Iface + "_" + sanitize(port)
+}
+
+// deviceSection is the UCI `config device` section name carrying an enslaved
+// wired port's unique MAC override, sanitized to a valid UCI section name.
+func (m *Manager) deviceSection(port string) string {
+	return "dev_" + sanitize(port)
 }
 
 // Apply authors bat0, a hard interface for the wireless mesh, a hard interface
@@ -125,6 +136,21 @@ func (m *Manager) Apply(ctx context.Context) error {
 				return fmt.Errorf("remove enslaved %s from lan bridge: %w", port, err)
 			}
 		}
+		// Give the port a unique locally-administered MAC so batman never sees two
+		// hardifs share one MAC (shared-MAC DSA gear). Best-effort: if the MAC can't
+		// be read or derived, the hardif still works on hardware with distinct MACs.
+		if m.cfg.MAC != nil {
+			if real, err := m.cfg.MAC(port); err == nil {
+				if uniq, derr := uniqueHardifMAC(real, port); derr == nil {
+					if err := m.uci.SetSection(ctx, "network", m.deviceSection(port), "device", map[string]string{
+						"name":    port,
+						"macaddr": uniq,
+					}); err != nil {
+						return fmt.Errorf("author unique mac for %s: %w", port, err)
+					}
+				}
+			}
+		}
 	}
 
 	// Bridge bat0 into the LAN so DHCP and clients ride on top of the mesh.
@@ -162,6 +188,9 @@ func (m *Manager) Teardown(ctx context.Context) error {
 	sections := []string{m.MeshHardif()}
 	for _, port := range m.cfg.WiredPorts {
 		sections = append(sections, m.WiredHardif(port))
+		if m.cfg.MAC != nil {
+			sections = append(sections, m.deviceSection(port))
+		}
 	}
 	sections = append(sections, m.cfg.Iface)
 	for _, s := range sections {

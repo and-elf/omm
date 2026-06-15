@@ -238,6 +238,56 @@ func lyraRadios() map[string]map[string]string {
 	}
 }
 
+// With no explicit MeshRadio, the mesh must auto-select the 2.4 GHz radio (the
+// only band 802.11s can legally/interoperably use on this gear), NOT the AP
+// radio — even when the AP radio (radio0) is 5 GHz. This is what lets a node
+// "just peer" without per-board mesh_radio config.
+func TestApplyProfileAutoSelectsMeshRadioByBand(t *testing.T) {
+	fake := &fakeUCI{wireless: lyraRadios()}
+	m := NewManager(nil, fake, Config{Radio: "radio0"}) // AP on 5 GHz radio0, MeshRadio unset
+
+	if err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", MeshSSID: "omm"}); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+	if got := fake.sections[meshSection]["device"]; got != "radio1" {
+		t.Errorf("mesh auto-selected radio %q, want radio1 (the 2.4 GHz radio)", got)
+	}
+	// The client AP still lands on the configured AP radio.
+	if got := fake.sections[apSection]["device"]; got != "radio0" {
+		t.Errorf("AP radio = %q, want radio0", got)
+	}
+}
+
+// An explicit MeshRadio always wins over auto-selection.
+func TestApplyProfileExplicitMeshRadioWins(t *testing.T) {
+	fake := &fakeUCI{wireless: lyraRadios()}
+	m := NewManager(nil, fake, Config{Radio: "radio0", MeshRadio: "radio2"})
+
+	if err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", MeshSSID: "omm"}); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+	if got := fake.sections[meshSection]["device"]; got != "radio2" {
+		t.Errorf("mesh radio = %q, want radio2 (explicit override)", got)
+	}
+}
+
+// With no 2.4 GHz radio present, mesh auto-selection falls back to the AP radio
+// rather than failing.
+func TestApplyProfileMeshRadioFallsBackWhenNo2g(t *testing.T) {
+	only5g := map[string]map[string]string{
+		"radio0": {".type": "wifi-device", ".name": "radio0", "band": "5g"},
+	}
+	fake := &fakeUCI{wireless: only5g}
+	m := NewManager(nil, fake, Config{Radio: "radio0"})
+
+	if err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", MeshSSID: "omm"}); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+	if got := fake.sections[meshSection]["device"]; got != "radio0" {
+		t.Errorf("mesh radio = %q, want radio0 (fallback to AP radio)", got)
+	}
+}
+
 func TestApplyProfileResolvesBandToRadio(t *testing.T) {
 	fake := &fakeUCI{wireless: lyraRadios()}
 	m := NewManager(nil, fake, Config{Radio: "radio0"})
@@ -257,7 +307,8 @@ func TestApplyProfileBandPicksLowestNumberedMatch(t *testing.T) {
 	if err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", MeshSSID: "omm", Band: "5g"}); err != nil {
 		t.Fatalf("apply profile: %v", err)
 	}
-	if got := fake.sections[meshSection]["device"]; got != "radio0" {
+	// Band resolves the AP radio (the mesh auto-selects its own 2.4 GHz radio).
+	if got := fake.sections[apSection]["device"]; got != "radio0" {
 		t.Fatalf("band 5g resolved to %q, want radio0 (lowest of radio0/radio2)", got)
 	}
 }

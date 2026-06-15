@@ -162,6 +162,49 @@ func TestApplyEnslavesWiredPorts(t *testing.T) {
 	}
 }
 
+func TestApplyAssignsUniqueMACToEnslavedPorts(t *testing.T) {
+	r := newRecordUCI()
+	// Two ports sharing one base MAC (the ZB DSA case) — each must get a distinct,
+	// locally-administered MAC so batman doesn't see colliding hardifs.
+	m := NewManager(r, Config{
+		Iface:      "bat0",
+		LanDevice:  "@device[0]",
+		WiredPorts: []string{"lan3", "wan"},
+		MAC:        func(dev string) (string, error) { return "f8:5e:3c:a0:57:8a", nil },
+	})
+	if err := m.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	macs := map[string]string{}
+	for _, port := range []string{"lan3", "wan"} {
+		sec := m.deviceSection(port)
+		name := r.opt(t, sec, "name")
+		if name != port {
+			t.Errorf("device section %s name = %q, want %q", sec, name, port)
+		}
+		mac := r.opt(t, sec, "macaddr")
+		if mac == "f8:5e:3c:a0:57:8a" {
+			t.Errorf("port %s kept the colliding base MAC", port)
+		}
+		if prev, dup := macs[mac]; dup {
+			t.Errorf("ports %s and %s share derived MAC %q", port, prev, mac)
+		}
+		macs[mac] = port
+	}
+}
+
+func TestApplyWithoutMACReaderSkipsDeviceSection(t *testing.T) {
+	r := newRecordUCI()
+	m := NewManager(r, Config{Iface: "bat0", LanDevice: "@device[0]", WiredPorts: []string{"wan"}})
+	if err := m.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, ok := r.opts[m.deviceSection("wan")]; ok {
+		t.Error("device section authored without a MAC reader")
+	}
+}
+
 func TestApplyBridgesBat0IntoLan(t *testing.T) {
 	r := newRecordUCI()
 	m := NewManager(r, Config{Iface: "bat0", LanDevice: "@device[0]"})

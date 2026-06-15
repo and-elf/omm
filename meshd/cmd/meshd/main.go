@@ -185,6 +185,7 @@ func main() {
 		BatmanPorts:       backhaulPlan.WiredPorts,
 		MeshStandby:       backhaulPlan.MeshStandby,
 		LanDevice:         cfg.LanDevice,
+		BatmanMAC:         batman.SysfsMAC(nil),
 		Batman:            profiles.UbusBatmanInspector{Ubus: ubusClient},
 	})
 
