@@ -156,6 +156,15 @@ for pkg in kmod-batman-adv batctl; do
 	fi
 done
 REMOTE
+	# netifd loads its protocol handlers (batadv/batadv_hardif) only at process
+	# start. If batman-adv was installed after netifd came up, the running netifd
+	# doesn't know the batadv proto — the bat0 soft interface stays `proto none`
+	# and never instantiates. A plain `network reload` does NOT reload handlers,
+	# so restart netifd here. This drops our SSH briefly (tolerated), then we wait
+	# for the network to recover before the meshd restart below.
+	echo "==> restarting netifd so it loads the batman-adv proto handlers"
+	ssh_ '/etc/init.d/network restart' >/dev/null 2>&1 || true
+	sleep 8
 fi
 
 # Restart when the binary changed, state was reset, or config changed; a
