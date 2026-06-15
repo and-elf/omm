@@ -61,15 +61,28 @@ func TestClientEnrollWaitsForManualAdoption(t *testing.T) {
 	srv, _, svc := newServer(t, false)
 	id, _ := identity.Generate()
 
-	// Approve out-of-band shortly after the client starts polling.
-	go func() {
-		time.Sleep(40 * time.Millisecond)
-		_, _ = svc.Adopt(context.Background(), id.NodeID())
-	}()
-
 	c := client.New(id, srv.URL, client.Options{PollInterval: 10 * time.Millisecond})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Approve out-of-band once the node reaches pending_approval. Adopt fails
+	// with ErrNotAdoptable until the client has POSTed /enroll/verify, so retry
+	// rather than racing a fixed delay against the client's progress — on a
+	// loaded CI runner a single timed attempt can fire before verify lands.
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if _, err := svc.Adopt(context.Background(), id.NodeID()); err == nil {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
 
 	res, err := c.Enroll(ctx, "SN-client-2")
 	if err != nil {
