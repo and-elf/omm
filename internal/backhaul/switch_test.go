@@ -105,6 +105,67 @@ func TestRunFailsOverAndBack(t *testing.T) {
 	}
 }
 
+// On a wired node the mesh can be re-enabled behind the failover's back — a
+// profile re-apply on a joined node's boot recreates the mesh enabled. With only
+// carrier-transition tracking the loop would never notice (carrier never
+// changed) and leave a standing ethernet+mesh bridging loop. With Current wired
+// in, the loop reconciles against the actual mesh state and disables it again.
+func TestRunReconcilesExternalMeshEnable(t *testing.T) {
+	var mu sync.Mutex
+	// actual is the real backhaul the reconciler observes: it starts wireless
+	// because something (a profile re-apply) left the mesh enabled while wired.
+	actual := topology.BackhaulWireless
+	var deactivations int
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+
+	go func() {
+		Run(ctx, Deps{
+			Interval: time.Millisecond,
+			Carrier:  func(context.Context) string { return topology.BackhaulEthernet }, // wire always up
+			Current:  func(context.Context) string { mu.Lock(); defer mu.Unlock(); return actual },
+			Activate: func(context.Context) error { mu.Lock(); actual = topology.BackhaulWireless; mu.Unlock(); return nil },
+			Deactivate: func(context.Context) error {
+				mu.Lock()
+				deactivations++
+				actual = topology.BackhaulEthernet
+				mu.Unlock()
+				return nil
+			},
+		})
+		close(done)
+	}()
+
+	wait := func(cond func() bool) {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			mu.Lock()
+			ok := cond()
+			mu.Unlock()
+			if ok {
+				return
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+		t.Fatal("condition not met in time")
+	}
+
+	// Wire is up but the mesh was left enabled -> reconcile by disabling it.
+	wait(func() bool { return deactivations == 1 })
+	// Simulate a profile re-apply re-enabling the mesh behind the loop's back.
+	mu.Lock()
+	actual = topology.BackhaulWireless
+	mu.Unlock()
+	// The loop must disable it again from the observed state, not wait for a
+	// (never-coming) carrier transition.
+	wait(func() bool { return deactivations == 2 })
+
+	cancel()
+	<-done
+}
+
 // A failed actuation does not advance state, so the next tick retries it.
 func TestRunRetriesOnActuationError(t *testing.T) {
 	var mu sync.Mutex

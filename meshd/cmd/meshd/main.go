@@ -551,8 +551,25 @@ func startBackhaulFailover(ctx context.Context, uciClient uci.Client, backhaulIf
 			return uciClient.Reload(ctx)
 		}
 	}
+	// observeMesh reports the actual backhaul from the mesh iface's enabled state
+	// so the loop reconciles each tick (a profile re-apply on a joined node's boot
+	// recreates the mesh enabled — without this the loop, having seen no carrier
+	// transition, would leave a standing ethernet+mesh bridging loop). No mesh
+	// section => "" (nothing to reconcile); enabled (disabled != "1") => wireless;
+	// explicitly disabled => ethernet.
+	observeMesh := func(ctx context.Context) string {
+		mode, err := uciClient.Get(ctx, "wireless", profiles.MeshSection, "mode")
+		if err != nil || mode == "" {
+			return ""
+		}
+		if disabled, err := uciClient.Get(ctx, "wireless", profiles.MeshSection, "disabled"); err == nil && disabled == "1" {
+			return topology.BackhaulEthernet
+		}
+		return topology.BackhaulWireless
+	}
 	go backhaul.Run(ctx, backhaul.Deps{
 		Carrier:    topology.SysfsBackhaul{Iface: backhaulIface}.Backhaul,
+		Current:    observeMesh,
 		Activate:   setMesh(true),
 		Deactivate: setMesh(false),
 	})
