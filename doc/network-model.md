@@ -116,6 +116,11 @@ bridge loop), which is **not used** when batman-adv is active.
 > garage) works, but multi-hop chaining and simultaneous wired+wireless on one
 > node are not guaranteed.
 
+The layer needs `kmod-batman-adv` (kernel module + netifd proto handlers) and
+`batctl` on each device, and — because netifd loads proto handlers only at
+startup — a netifd restart after installing them. See
+[Routing layer requirements](openwrt.md#routing-layer-requirements-batman-adv).
+
 ### Tier 2 — wired multi-AP (degraded)
 
 When the node lacks a mesh-capable `wpad` (the default `wpad-basic-*` cannot do
