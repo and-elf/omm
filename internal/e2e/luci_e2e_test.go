@@ -92,6 +92,23 @@ cat > /etc/config/system <<'EOF'
 config system
 	option hostname 'OpenWrt'
 EOF
+# Seed /etc/config/network too: the profile apply authors the batman-adv stack
+# (the bat0 soft interface + its hardifs) into this config and bridges bat0 into
+# the LAN device (@device[0]). uci add/set return "Not found" (exit 252) when the
+# config file is absent, and the bat0 bridging needs a device[0] to exist — so
+# provide a br-lan bridge, as a real device ships.
+cat > /etc/config/network <<'EOF'
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+config device
+	option name 'br-lan'
+	option type 'bridge'
+	list ports 'eth0'
+config interface 'lan'
+	option device 'br-lan'
+	option proto 'static'
+EOF
 
 # Stub the netifd objects the apply reloads through (absent without netifd):
 # meshd calls 'network reload' then 'network.wireless reconf' and only needs
