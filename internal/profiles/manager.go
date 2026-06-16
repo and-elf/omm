@@ -121,11 +121,15 @@ type Config struct {
 	// BatmanRoutingAlgo selects batman-adv's metric (default "BATMAN_IV").
 	BatmanRoutingAlgo string
 	// BatmanPorts are wired backhaul ethernet devices to enslave to bat0 as hard
-	// interfaces, so a wired hop is routed by batman-adv too. The daemon resolves
-	// these once at startup (batman.ResolveBackhaul: the wired uplink, gated on a
-	// batman peer being present on that wire) and passes the result here; an
-	// explicit operator config also lands here. Empty means no wired batman link.
+	// interfaces, so a wired hop is routed by batman-adv too. Empty means no wired
+	// batman link. BatmanPortsFn overrides this when set.
 	BatmanPorts []string
+	// BatmanPortsFn, when set, supplies the enslaved wired ports dynamically at
+	// each apply, overriding BatmanPorts. The daemon's reconcile loop owns this set
+	// — it scans every wired port for an OMM peer beacon and updates it as peers
+	// appear/disappear — so a profile re-apply re-asserts the live set rather than
+	// a stale snapshot.
+	BatmanPortsFn func() []string
 	// MeshStandby keeps the 802.11s mesh an admin standby (authored disabled) under
 	// batman instead of an always-on hardif. It is set for a node whose wired
 	// uplink is NOT enslaved to batman (a node on the controller's shared LAN,
@@ -219,10 +223,14 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 	meshNetwork := "lan"
 	var bm *batman.Manager
 	if m.cfg.BatmanEnable && profile.MeshSSID != "" {
+		wiredPorts := m.cfg.BatmanPorts
+		if m.cfg.BatmanPortsFn != nil {
+			wiredPorts = m.cfg.BatmanPortsFn()
+		}
 		bm = batman.NewManager(m.uciClient, batman.Config{
 			Iface:       m.cfg.BatmanIface,
 			RoutingAlgo: m.cfg.BatmanRoutingAlgo,
-			WiredPorts:  m.cfg.BatmanPorts,
+			WiredPorts:  wiredPorts,
 			LanDevice:   m.cfg.LanDevice,
 			MAC:         m.cfg.BatmanMAC,
 		})

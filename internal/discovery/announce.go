@@ -10,12 +10,17 @@ import (
 	"time"
 )
 
-// Announcement is the controller presence message broadcast over UDP.
+// Announcement is the presence message broadcast over UDP. Controllers carry an
+// API endpoint (for discovery/onboarding); every meshd (controller or node) also
+// carries its NodeID, so a peer that receives a beacon on a wired port can tell
+// an OMM node is on that wire (the bootstrap signal for per-port batman
+// enslavement — independent of batman state).
 type Announcement struct {
 	HomeID       string `json:"home_id"`
 	Name         string `json:"name"`
 	ControllerID string `json:"controller_id"`
 	API          string `json:"api"`
+	NodeID       string `json:"node_id,omitempty"`
 }
 
 // Announce periodically broadcasts the controller announcement until the

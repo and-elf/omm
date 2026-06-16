@@ -586,6 +586,30 @@ func TestApplyProfileBatmanEnslavesConfiguredPorts(t *testing.T) {
 	}
 }
 
+// BatmanPortsFn supplies the enslaved ports dynamically (the reconcile loop's
+// live set), overriding the static BatmanPorts.
+func TestApplyProfileBatmanPortsFnOverrides(t *testing.T) {
+	fake := &fakeUCI{}
+	m := NewManager(nil, fake, Config{
+		Radio:         "radio0",
+		BatmanEnable:  true,
+		LanDevice:     "@device[0]",
+		Mesh:          fakeMesh{up: true},
+		Batman:        fakeBatman{up: true},
+		BatmanPorts:   []string{"stale"},
+		BatmanPortsFn: func() []string { return []string{"wan"} },
+	})
+	if err := m.ApplyProfile(context.Background(), models.Profile{HomeID: "h1", MeshSSID: "omm"}); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	if wired := fake.sections["bat0_wan"]; wired["device"] != "wan" {
+		t.Errorf("dynamic port wan not enslaved; bat0_wan = %v", wired)
+	}
+	if _, ok := fake.sections["bat0_stale"]; ok {
+		t.Error("stale static BatmanPorts used despite BatmanPortsFn")
+	}
+}
+
 // In MeshStandby (case 3: a node whose wired uplink stays plain-bridged), the
 // mesh is authored DISABLED even under batman — the carrier-toggle failover
 // enables it only on wire loss, so wired + mesh never bridge-loop.

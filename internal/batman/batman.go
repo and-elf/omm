@@ -119,37 +119,10 @@ func (m *Manager) Apply(ctx context.Context) error {
 		return fmt.Errorf("author mesh hardif: %w", err)
 	}
 
-	// Wired backhaul hard interfaces: pin each ethernet device to bat0, and take
-	// it OUT of the LAN bridge. A device that is both a br-lan member and a batadv
-	// hardif is the redundant wired+wireless L2 path that storms — the uplink must
-	// belong to batman exclusively, while client jacks stay normal bridge ports.
+	// Wired backhaul hard interfaces: enslave each configured ethernet device.
 	for _, port := range m.cfg.WiredPorts {
-		if err := m.uci.SetSection(ctx, "network", m.WiredHardif(port), "interface", map[string]string{
-			"proto":  "batadv_hardif",
-			"master": m.cfg.Iface,
-			"device": port,
-		}); err != nil {
-			return fmt.Errorf("author wired hardif %s: %w", port, err)
-		}
-		if m.cfg.LanDevice != "" {
-			if err := m.uci.DelListItem(ctx, "network", m.cfg.LanDevice, "ports", port); err != nil {
-				return fmt.Errorf("remove enslaved %s from lan bridge: %w", port, err)
-			}
-		}
-		// Give the port a unique locally-administered MAC so batman never sees two
-		// hardifs share one MAC (shared-MAC DSA gear). Best-effort: if the MAC can't
-		// be read or derived, the hardif still works on hardware with distinct MACs.
-		if m.cfg.MAC != nil {
-			if real, err := m.cfg.MAC(port); err == nil {
-				if uniq, derr := uniqueHardifMAC(real, port); derr == nil {
-					if err := m.uci.SetSection(ctx, "network", m.deviceSection(port), "device", map[string]string{
-						"name":    port,
-						"macaddr": uniq,
-					}); err != nil {
-						return fmt.Errorf("author unique mac for %s: %w", port, err)
-					}
-				}
-			}
+		if err := m.EnslavePort(ctx, port); err != nil {
+			return err
 		}
 	}
 
@@ -166,34 +139,81 @@ func (m *Manager) Apply(ctx context.Context) error {
 	return nil
 }
 
+// EnslavePort makes one ethernet device a batman backhaul hardif: it authors the
+// batadv_hardif, takes the device OUT of the LAN bridge (a device that is both a
+// br-lan member and a batadv hardif is the redundant L2 path that storms), and
+// assigns it a unique locally-administered MAC when a MAC reader is configured
+// (so shared-MAC DSA ports don't collide on bat0). Idempotent; it does not
+// commit/reload, so callers can batch and the reconcile loop can add a port that
+// a peer appeared on. bat0 must already exist (Apply authors it).
+func (m *Manager) EnslavePort(ctx context.Context, port string) error {
+	if err := m.uci.SetSection(ctx, "network", m.WiredHardif(port), "interface", map[string]string{
+		"proto":  "batadv_hardif",
+		"master": m.cfg.Iface,
+		"device": port,
+	}); err != nil {
+		return fmt.Errorf("author wired hardif %s: %w", port, err)
+	}
+	if m.cfg.LanDevice != "" {
+		if err := m.uci.DelListItem(ctx, "network", m.cfg.LanDevice, "ports", port); err != nil {
+			return fmt.Errorf("remove enslaved %s from lan bridge: %w", port, err)
+		}
+	}
+	if m.cfg.MAC != nil {
+		if real, err := m.cfg.MAC(port); err == nil {
+			if uniq, derr := uniqueHardifMAC(real, port); derr == nil {
+				if err := m.uci.SetSection(ctx, "network", m.deviceSection(port), "device", map[string]string{
+					"name":    port,
+					"macaddr": uniq,
+				}); err != nil {
+					return fmt.Errorf("author unique mac for %s: %w", port, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ReleasePort reverses EnslavePort: it hands the device back to the LAN bridge
+// (so it serves clients / keeps wired connectivity again) and deletes its
+// batman hardif and MAC override. Idempotent; no commit/reload. Used both by
+// Teardown and by the reconcile loop when a peer disappears from a port.
+func (m *Manager) ReleasePort(ctx context.Context, port string) error {
+	if m.cfg.LanDevice != "" {
+		// del-then-add keeps exactly one entry.
+		if err := m.uci.DelListItem(ctx, "network", m.cfg.LanDevice, "ports", port); err != nil {
+			return fmt.Errorf("clear stale %s lan port: %w", port, err)
+		}
+		if err := m.uci.AddListItem(ctx, "network", m.cfg.LanDevice, "ports", port); err != nil {
+			return fmt.Errorf("restore %s to lan bridge: %w", port, err)
+		}
+	}
+	if err := m.uci.Delete(ctx, "network", m.WiredHardif(port)); err != nil {
+		return fmt.Errorf("delete %s: %w", m.WiredHardif(port), err)
+	}
+	if m.cfg.MAC != nil {
+		if err := m.uci.Delete(ctx, "network", m.deviceSection(port)); err != nil {
+			return fmt.Errorf("delete %s: %w", m.deviceSection(port), err)
+		}
+	}
+	return nil
+}
+
 // Teardown removes the batman sections and unbridges bat0 from the LAN, so a
-// degrade to a direct mesh-on-lan bridge re-sets cleanly. It is best-effort per
-// section is not required — callers degrade only when batman failed to come up.
+// degrade to a direct mesh-on-lan bridge re-sets cleanly. It releases each
+// enslaved wired port back to the LAN bridge first.
 func (m *Manager) Teardown(ctx context.Context) error {
 	if m.cfg.LanDevice != "" {
 		if err := m.uci.DelListItem(ctx, "network", m.cfg.LanDevice, "ports", m.cfg.Iface); err != nil {
 			return fmt.Errorf("unbridge %s from lan: %w", m.cfg.Iface, err)
 		}
-		// Hand each enslaved uplink back to br-lan so the node keeps its wired
-		// connectivity once batman is gone. del-then-add keeps it to one entry.
-		for _, port := range m.cfg.WiredPorts {
-			if err := m.uci.DelListItem(ctx, "network", m.cfg.LanDevice, "ports", port); err != nil {
-				return fmt.Errorf("clear stale %s lan port: %w", port, err)
-			}
-			if err := m.uci.AddListItem(ctx, "network", m.cfg.LanDevice, "ports", port); err != nil {
-				return fmt.Errorf("restore %s to lan bridge: %w", port, err)
-			}
-		}
 	}
-	sections := []string{m.MeshHardif()}
 	for _, port := range m.cfg.WiredPorts {
-		sections = append(sections, m.WiredHardif(port))
-		if m.cfg.MAC != nil {
-			sections = append(sections, m.deviceSection(port))
+		if err := m.ReleasePort(ctx, port); err != nil {
+			return err
 		}
 	}
-	sections = append(sections, m.cfg.Iface)
-	for _, s := range sections {
+	for _, s := range []string{m.MeshHardif(), m.cfg.Iface} {
 		if err := m.uci.Delete(ctx, "network", s); err != nil {
 			return fmt.Errorf("delete %s: %w", s, err)
 		}
