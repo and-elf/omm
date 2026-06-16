@@ -37,6 +37,21 @@ const style: cytoscape.StylesheetStyle[] = [
   // A node running as multi-AP (802.11s degraded/unavailable) is tinted amber so
   // the fallback stands out per node.
   { selector: '.node--multiap', style: { 'background-color': '#f59e0b' } },
+  // Liveness: a node the controller has stopped hearing from is onboarded but not
+  // alive (#29). Stale (recently overdue) is dimmed grey; down (long silent) is
+  // greyed out with a red dashed border, its label already suffixed with ✕.
+  { selector: '.node--stale', style: { 'background-color': '#64748b', opacity: 0.55, 'text-opacity': 0.7 } },
+  {
+    selector: '.node--down',
+    style: {
+      'background-color': '#475569',
+      'border-width': 3,
+      'border-color': '#ef4444',
+      'border-style': 'dashed',
+      opacity: 0.5,
+      color: '#fca5a5',
+    },
+  },
   {
     selector: '.client',
     style: { 'background-color': '#64748b', shape: 'round-rectangle', width: 18, height: 18 },
@@ -112,6 +127,8 @@ onBeforeUnmount(() => cy.value?.destroy())
       <span><i class="dot dot--node"></i> mesh node</span>
       <span><i class="dot dot--client"></i> client</span>
       <span><i class="dot dot--multiap"></i> multi-AP (no 802.11s) ⚠</span>
+      <span><i class="dot dot--stale"></i> stale (overdue · last seen)</span>
+      <span><i class="dot dot--down"></i> down (onboarded, silent) ✕</span>
       <span><i class="line line--wired"></i> wired (solid · speed)</span>
       <span><i class="line line--wireless"></i> wireless (dashed · RSSI)</span>
       <span><i class="line line--excellent"></i> excellent</span>
@@ -164,6 +181,15 @@ onBeforeUnmount(() => cy.value?.destroy())
 }
 .dot--multiap {
   background: #f59e0b;
+}
+.dot--stale {
+  background: #64748b;
+  opacity: 0.55;
+}
+.dot--down {
+  background: #475569;
+  border: 2px dashed #ef4444;
+  opacity: 0.6;
 }
 .line {
   width: 16px;

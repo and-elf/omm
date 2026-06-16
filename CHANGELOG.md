@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   endpoints to the owning node ID, dropping the redundant MAC nodes.
 
 ### Added
+- **Node liveness in the topology graph (#29).** An onboarded node that stops
+  reporting — powered off, meshd down, or mesh failed to form — no longer
+  silently vanishes from the map. The aggregator keeps onboarded nodes (from the
+  controller's inventory, scoped to its own home) visible and tags each with a
+  `status` (`alive`/`stale`/`down`) and `last_seen`. Stale and down nodes appear
+  as isolated vertices (their stale links are not merged); the Topology view dims
+  a stale node and crosses out a down one (`✕`), labelling both with how long ago
+  they were last seen. A pure liveness signal — no dependency on internet
+  connectivity. New `staleTTL` window on the aggregator (5 min default).
 - **Link type and quality in the topology graph (#28).** Each mesh link now
   carries its medium and a metric: `kind` (`wired`/`wireless`, derived from the
   outgoing batman hard interface in `batctl o`), `speed_mbps` for wired links

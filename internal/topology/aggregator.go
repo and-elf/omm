@@ -10,10 +10,11 @@ import (
 // Each node pushes its local graph (Ingest); a controller serves the merged
 // view (Merge) combining its own local graph with fresh reports.
 type Aggregator struct {
-	mu      sync.Mutex
-	reports map[string]timedGraph
-	ttl     int64 // seconds; <=0 means reports never expire
-	now     func() int64
+	mu       sync.Mutex
+	reports  map[string]timedGraph
+	ttl      int64 // seconds; <=0 means reports never expire (alive window)
+	staleTTL int64 // seconds; a node silent longer than this is "down" (else "stale")
+	now      func() int64
 }
 
 type timedGraph struct {
@@ -21,13 +22,19 @@ type timedGraph struct {
 	at    int64
 }
 
-// NewAggregator creates an aggregator. Reports older than ttl are ignored by
-// Merge. now defaults to time.Now (unix seconds).
-func NewAggregator(ttl time.Duration, now func() int64) *Aggregator {
+// NewAggregator creates an aggregator. ttl is the freshness window: a node
+// reporting within it is alive and its links/clients are merged. staleTTL is the
+// longer window past which an onboarded-but-silent node is "down" rather than
+// "stale" (defaults to 3*ttl when <=0). now defaults to time.Now (unix seconds).
+func NewAggregator(ttl, staleTTL time.Duration, now func() int64) *Aggregator {
 	if now == nil {
 		now = func() int64 { return time.Now().Unix() }
 	}
-	return &Aggregator{reports: map[string]timedGraph{}, ttl: int64(ttl.Seconds()), now: now}
+	stale := int64(staleTTL.Seconds())
+	if stale <= 0 {
+		stale = 3 * int64(ttl.Seconds())
+	}
+	return &Aggregator{reports: map[string]timedGraph{}, ttl: int64(ttl.Seconds()), staleTTL: stale, now: now}
 }
 
 // Ingest records the latest topology report from a node.
@@ -37,18 +44,26 @@ func (a *Aggregator) Ingest(nodeID string, g Graph) {
 	a.reports[nodeID] = timedGraph{graph: g, at: a.now()}
 }
 
-// Merge combines the local graph with all fresh reports into one graph.
-func (a *Aggregator) Merge(local Graph) Graph {
+// Merge combines the local graph with all fresh reports into one graph, then
+// surfaces onboarded inventory nodes that are not currently reporting as
+// stale/down vertices so they don't silently vanish (#29). Only fresh reports
+// (within ttl) contribute links and clients — a stale node's edges are stale, so
+// it appears as an isolated, marked vertex. Every node carries a derived Status
+// and a LastSeen timestamp.
+func (a *Aggregator) Merge(local Graph, inventory ...InventoryNode) Graph {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	cutoff := a.now() - a.ttl
+	now := a.now()
+	cutoff := now - a.ttl
 	type entry struct {
 		id string
 		tg timedGraph
 	}
 	var fresh []entry
+	reportedAt := make(map[string]int64, len(a.reports)) // last report time per node, fresh or not
 	for id, tg := range a.reports {
+		reportedAt[id] = tg.at
 		if a.ttl <= 0 || tg.at >= cutoff {
 			fresh = append(fresh, entry{id, tg})
 		}
@@ -66,7 +81,46 @@ func (a *Aggregator) Merge(local Graph) Graph {
 	for _, e := range fresh {
 		graphs = append(graphs, e.tg.graph)
 	}
-	return mergeGraphs(graphs)
+	g := mergeGraphs(graphs)
+
+	// Every node in the merged graph came from the local view or a fresh report,
+	// so it is alive. last_seen is the node's own report time when it pushed one,
+	// else now (it is reachable in a current report). The local "self" is now.
+	alive := make(map[string]bool, len(g.Nodes))
+	for i := range g.Nodes {
+		id := g.Nodes[i].ID
+		alive[id] = true
+		g.Nodes[i].Status = StatusAlive
+		if at, ok := reportedAt[id]; ok {
+			g.Nodes[i].LastSeen = at
+		} else {
+			g.Nodes[i].LastSeen = now
+		}
+	}
+
+	// Surface onboarded nodes the controller is not currently hearing from. Their
+	// last_seen is the newer of their last report (if any) and the inventory
+	// record; status is stale within the stale window, else down.
+	downCutoff := now - a.staleTTL
+	for _, inv := range inventory {
+		if alive[inv.ID] {
+			continue
+		}
+		last := inv.LastSeen
+		if at, ok := reportedAt[inv.ID]; ok && at > last {
+			last = at
+		}
+		status := StatusDown
+		if last >= downCutoff {
+			status = StatusStale
+		}
+		label := inv.Label
+		if label == "" {
+			label = inv.ID
+		}
+		g.Nodes = append(g.Nodes, Node{ID: inv.ID, Label: label, Role: "node", Status: status, LastSeen: last})
+	}
+	return g
 }
 
 // mergeGraphs unions nodes (first occurrence wins, so the local "self" is

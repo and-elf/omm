@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { signalClass, speedLabel, toElements, tqClass } from './topology'
+import { relativeTime, signalClass, speedLabel, toElements, tqClass } from './topology'
 
 describe('topology element builder', () => {
   it('classifies signal across four tiers', () => {
@@ -100,6 +100,46 @@ describe('topology element builder', () => {
     expect(n2?.classes).not.toContain('node--multiap')
     expect(n2?.data.mesh_mode).toBe('802.11s')
     expect(n2?.data.label).toBe('n2')
+  })
+
+  it('formats a relative last-seen time', () => {
+    const now = 1_000_000 // seconds
+    expect(relativeTime(now - 5, now)).toBe('just now')
+    expect(relativeTime(now - 120, now)).toBe('2m ago')
+    expect(relativeTime(now - 2 * 3600, now)).toBe('2h ago')
+    expect(relativeTime(now - 3 * 86400, now)).toBe('3d ago')
+    expect(relativeTime(0, now)).toBe('')
+    expect(relativeTime(undefined, now)).toBe('')
+  })
+
+  it('dims a stale node and crosses out a down node, both with a last-seen label', () => {
+    const now = 1_000_000
+    const els = toElements(
+      {
+        nodes: [
+          { id: 'ctrl', label: 'Gateway', role: 'self', status: 'alive', last_seen: now },
+          { id: 'n1', label: 'Hallway', role: 'node', status: 'stale', last_seen: now - 120 },
+          { id: 'n2', label: 'Garage', role: 'node', status: 'down', last_seen: now - 3 * 86400 },
+        ],
+        links: null,
+        clients: null,
+      },
+      now,
+    )
+
+    const ctrl = els.find((e) => e.data.id === 'ctrl')
+    expect(ctrl?.classes).not.toContain('node--stale')
+    expect(ctrl?.classes).not.toContain('node--down')
+    expect(ctrl?.data.label).toBe('Gateway')
+
+    const stale = els.find((e) => e.data.id === 'n1')
+    expect(stale?.classes).toContain('node--stale')
+    expect(stale?.data.status).toBe('stale')
+    expect(stale?.data.label).toBe('Hallway · 2m ago')
+
+    const down = els.find((e) => e.data.id === 'n2')
+    expect(down?.classes).toContain('node--down')
+    expect(down?.data.label).toBe('Garage ✕ 3d ago')
   })
 
   it('tolerates null arrays', () => {

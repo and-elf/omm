@@ -7,7 +7,7 @@ import (
 
 func TestMergeUnionsReports(t *testing.T) {
 	clock := int64(1000)
-	agg := NewAggregator(time.Minute, func() int64 { return clock })
+	agg := NewAggregator(time.Minute, 5*time.Minute, func() int64 { return clock })
 
 	// Controller's own local view.
 	local := Graph{
@@ -70,7 +70,7 @@ func TestMergeUnionsReports(t *testing.T) {
 
 func TestMergePreservesBackhaulOnDemotedNode(t *testing.T) {
 	clock := int64(1000)
-	agg := NewAggregator(time.Minute, func() int64 { return clock })
+	agg := NewAggregator(time.Minute, 5*time.Minute, func() int64 { return clock })
 
 	// A member node reports itself (self) carrying its backhaul type.
 	agg.Ingest("n1", Graph{
@@ -106,7 +106,7 @@ func TestMergePreservesBackhaulOnDemotedNode(t *testing.T) {
 // the phantom MAC nodes.
 func TestMergeReconcilesMACLinksToNodeIDs(t *testing.T) {
 	clock := int64(1000)
-	agg := NewAggregator(time.Minute, func() int64 { return clock })
+	agg := NewAggregator(time.Minute, 5*time.Minute, func() int64 { return clock })
 
 	// Controller's local view: it knows neighbour "n1" only by its batman MAC, so
 	// it created a phantom node + a link to that MAC.
@@ -152,7 +152,7 @@ func TestMergeReconcilesMACLinksToNodeIDs(t *testing.T) {
 
 func TestMergeKeepsStrongestLinkAndDropsStale(t *testing.T) {
 	clock := int64(1000)
-	agg := NewAggregator(30*time.Second, func() int64 { return clock })
+	agg := NewAggregator(30*time.Second, 2*time.Minute, func() int64 { return clock })
 
 	agg.Ingest("n1", Graph{Links: []Link{{Source: "ctrl", Target: "n1", TQ: 120}}})
 
@@ -173,5 +173,128 @@ func TestMergeKeepsStrongestLinkAndDropsStale(t *testing.T) {
 	}
 	if len(g.Links) != 1 || g.Links[0].TQ != 240 {
 		t.Fatalf("expected single link with strongest TQ 240, got %+v", g.Links)
+	}
+}
+
+func nodeByID(g Graph, id string) *Node {
+	for i := range g.Nodes {
+		if g.Nodes[i].ID == id {
+			return &g.Nodes[i]
+		}
+	}
+	return nil
+}
+
+// A node reporting within the freshness window is alive and carries the
+// timestamp of its own report as last_seen.
+func TestMergeMarksAliveNodeWithLastSeen(t *testing.T) {
+	clock := int64(1000)
+	agg := NewAggregator(time.Minute, 5*time.Minute, func() int64 { return clock })
+
+	agg.Ingest("n1", Graph{Nodes: []Node{{ID: "n1", Role: "self"}}})
+
+	clock = 1010
+	g := agg.Merge(Graph{Nodes: []Node{{ID: "ctrl", Role: "self"}}})
+
+	if ctrl := nodeByID(g, "ctrl"); ctrl == nil || ctrl.Status != StatusAlive || ctrl.LastSeen != 1010 {
+		t.Fatalf("ctrl (self) should be alive, last_seen=now: %+v", ctrl)
+	}
+	n1 := nodeByID(g, "n1")
+	if n1 == nil || n1.Status != StatusAlive {
+		t.Fatalf("n1 should be alive: %+v", n1)
+	}
+	if n1.LastSeen != 1000 {
+		t.Fatalf("n1 last_seen should be its report time 1000, got %d", n1.LastSeen)
+	}
+}
+
+// An onboarded node that has never reported (or last reported beyond the stale
+// window) is surfaced as a down, isolated vertex from inventory alone — it does
+// not silently vanish (#29).
+func TestMergeSurfacesDownInventoryNode(t *testing.T) {
+	clock := int64(10_000)
+	agg := NewAggregator(time.Minute, 5*time.Minute, func() int64 { return clock })
+
+	// n9 onboarded long ago and has never reported.
+	g := agg.Merge(Graph{Nodes: []Node{{ID: "ctrl", Role: "self"}}},
+		InventoryNode{ID: "n9", Label: "Garage", LastSeen: 100})
+
+	n9 := nodeByID(g, "n9")
+	if n9 == nil {
+		t.Fatalf("onboarded-but-silent node must appear, got %+v", g.Nodes)
+	}
+	if n9.Status != StatusDown {
+		t.Fatalf("n9 should be down, got %q", n9.Status)
+	}
+	if n9.Label != "Garage" || n9.Role != "node" {
+		t.Fatalf("n9 should carry its inventory label and node role: %+v", n9)
+	}
+	if n9.LastSeen != 100 {
+		t.Fatalf("n9 last_seen should fall back to inventory time 100, got %d", n9.LastSeen)
+	}
+	// A down node is isolated: no links reference it.
+	for _, l := range g.Links {
+		if l.Source == "n9" || l.Target == "n9" {
+			t.Fatalf("down node must not have links: %+v", l)
+		}
+	}
+}
+
+// A node whose last report is past the freshness window but within the stale
+// window shows as stale, and its (now untrustworthy) links are not merged.
+func TestMergeSurfacesStaleInventoryNodeWithoutLinks(t *testing.T) {
+	clock := int64(10_000)
+	agg := NewAggregator(time.Minute, 5*time.Minute, func() int64 { return clock })
+
+	// n3 last reported 2 minutes ago: past the 1-minute alive window, within the
+	// 5-minute stale window. Its report carried a link.
+	agg.reports["n3"] = timedGraph{
+		graph: Graph{
+			Nodes: []Node{{ID: "n3", Role: "self"}},
+			Links: []Link{{Source: "n3", Target: "ctrl", TQ: 150}},
+		},
+		at: 10_000 - 120,
+	}
+
+	g := agg.Merge(Graph{Nodes: []Node{{ID: "ctrl", Role: "self"}}},
+		InventoryNode{ID: "n3", Label: "Hallway", LastSeen: 100})
+
+	n3 := nodeByID(g, "n3")
+	if n3 == nil || n3.Status != StatusStale {
+		t.Fatalf("n3 should be stale: %+v", n3)
+	}
+	// last_seen prefers the (newer) report time over the inventory time.
+	if n3.LastSeen != 10_000-120 {
+		t.Fatalf("n3 last_seen should be its last report time, got %d", n3.LastSeen)
+	}
+	for _, l := range g.Links {
+		if l.Source == "n3" || l.Target == "n3" {
+			t.Fatalf("stale node's links must not be merged: %+v", l)
+		}
+	}
+}
+
+// An inventory node that is also reporting fresh stays alive and appears once.
+func TestMergeAliveInventoryNotDuplicated(t *testing.T) {
+	clock := int64(1000)
+	agg := NewAggregator(time.Minute, 5*time.Minute, func() int64 { return clock })
+
+	agg.Ingest("n1", Graph{Nodes: []Node{{ID: "n1", Role: "self"}}})
+
+	clock = 1005
+	g := agg.Merge(Graph{Nodes: []Node{{ID: "ctrl", Role: "self"}}},
+		InventoryNode{ID: "n1", Label: "Kitchen", LastSeen: 100})
+
+	count := 0
+	for _, n := range g.Nodes {
+		if n.ID == "n1" {
+			count++
+			if n.Status != StatusAlive {
+				t.Fatalf("reporting inventory node should be alive, got %q", n.Status)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected n1 exactly once, got %d", count)
 	}
 }

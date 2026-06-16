@@ -43,10 +43,24 @@ export function backhaulClass(backhaul?: string): string {
 }
 
 /**
+ * Formats how long ago a node was last seen (`lastSeen` vs `now`, both unix
+ * seconds) as a human label: "just now", "2m ago", "2h ago", "3d ago". Returns
+ * "" when the time is unknown (0/undefined), so callers can omit the suffix.
+ */
+export function relativeTime(lastSeen: number | undefined, now: number): string {
+  if (!lastSeen) return ''
+  const d = Math.max(0, Math.round(now - lastSeen))
+  if (d < 60) return 'just now'
+  if (d < 3600) return `${Math.round(d / 60)}m ago`
+  if (d < 86400) return `${Math.round(d / 3600)}h ago`
+  return `${Math.round(d / 86400)}d ago`
+}
+
+/**
  * Builds Cytoscape elements from a topology graph: mesh nodes, client nodes,
  * mesh links labelled with TQ, and client links labelled with RSSI.
  */
-export function toElements(topo: Topology): CyElement[] {
+export function toElements(topo: Topology, now: number = Date.now() / 1000): CyElement[] {
   const elements: CyElement[] = []
 
   for (const node of topo.nodes ?? []) {
@@ -54,18 +68,33 @@ export function toElements(topo: Topology): CyElement[] {
     if (node.role === 'self') classes.push('node--self')
     const bh = backhaulClass(node.backhaul)
     if (bh) classes.push(bh)
-    // A node that degraded to multi-AP gets a marked class and a ⚠ label
-    // suffix, so per-node fallback is visible in the graph (the border already
-    // encodes ethernet/wireless backhaul, an orthogonal axis).
-    const label = node.label || node.id
-    if (node.mesh_mode === 'multi_ap') classes.push('node--multiap')
+    let label = node.label || node.id
+    // Liveness wins the label: a node the controller has stopped hearing from is
+    // dimmed (stale) or crossed-out (down) and labelled with how long ago it was
+    // last seen, so an onboarded-but-not-alive node is visible rather than gone
+    // (#29). Only a live node can carry mesh_mode, so multi-AP is mutually
+    // exclusive with stale/down here.
+    if (node.status === 'down' || node.status === 'stale') {
+      classes.push(node.status === 'down' ? 'node--down' : 'node--stale')
+      const rt = relativeTime(node.last_seen, now)
+      if (node.status === 'down') label = rt ? `${label} ✕ ${rt}` : `${label} ✕`
+      else if (rt) label = `${label} · ${rt}`
+    } else if (node.mesh_mode === 'multi_ap') {
+      // A node that degraded to multi-AP gets a marked class and a ⚠ label
+      // suffix, so per-node fallback is visible in the graph (the border already
+      // encodes ethernet/wireless backhaul, an orthogonal axis).
+      classes.push('node--multiap')
+      label = `${label} ⚠`
+    }
     elements.push({
       group: 'nodes',
       data: {
         id: node.id,
-        label: node.mesh_mode === 'multi_ap' ? `${label} ⚠` : label,
+        label,
         backhaul: node.backhaul,
         mesh_mode: node.mesh_mode,
+        status: node.status,
+        last_seen: node.last_seen,
       },
       classes: classes.join(' '),
     })
