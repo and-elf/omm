@@ -242,6 +242,11 @@ func main() {
 		wifiClients,
 		topology.SysfsBackhaul{Iface: cfg.BackhaulIface},
 		storeMeshMode{store: store},
+		// Classify each mesh link's medium (solid wired / dashed wireless) and
+		// measure its speed or RSSI, and report this node's bat0 address so the
+		// controller can reconcile MAC-keyed links back to node IDs (#27/#28).
+		topology.WithLinkMetrics(topology.SysfsIwLinkMetrics{}),
+		topology.WithSelfAddrs(topology.SysfsSelfAddrs{Iface: cfg.BatmanIface}),
 	)
 
 	// Passively cache controller announcements so /scan answers instantly.

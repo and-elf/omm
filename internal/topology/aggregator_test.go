@@ -98,6 +98,58 @@ func TestMergePreservesBackhaulOnDemotedNode(t *testing.T) {
 	}
 }
 
+// TestMergeReconcilesMACLinksToNodeIDs is the core of issues #27/#28: batman-adv
+// neighbours are keyed by originator MAC, but nodes self-report under a node ID.
+// Without reconciliation, the controller's link points at a phantom MAC blob and
+// the real nodes never connect. Each node reporting its own batman address lets
+// the aggregator rewrite those MAC endpoints to the owning node's ID and drop
+// the phantom MAC nodes.
+func TestMergeReconcilesMACLinksToNodeIDs(t *testing.T) {
+	clock := int64(1000)
+	agg := NewAggregator(time.Minute, func() int64 { return clock })
+
+	// Controller's local view: it knows neighbour "n1" only by its batman MAC, so
+	// it created a phantom node + a link to that MAC.
+	local := Graph{
+		Nodes: []Node{
+			{ID: "ctrl", Label: "Gateway", Role: "self", Addrs: []string{"de:ad:be:ef:00:0c"}},
+			{ID: "aa:bb:cc:dd:ee:01", Label: "aa:bb:cc:dd:ee:01", Role: "node"},
+		},
+		Links: []Link{{Source: "ctrl", Target: "aa:bb:cc:dd:ee:01", TQ: 220, Kind: LinkWireless, Signal: -55}},
+	}
+
+	// n1 reports itself, declaring the batman MAC the controller saw as its own.
+	agg.Ingest("n1", Graph{
+		Nodes: []Node{{ID: "n1", Label: "Kitchen", Role: "self", Addrs: []string{"aa:bb:cc:dd:ee:01"}}},
+		Links: []Link{{Source: "n1", Target: "de:ad:be:ef:00:0c", TQ: 218, Kind: LinkWireless, Signal: -57}},
+	})
+
+	g := agg.Merge(local)
+
+	// The phantom MAC node is gone; only ctrl and n1 remain.
+	if len(g.Nodes) != 2 {
+		t.Fatalf("expected phantom MAC node dropped, got %d: %+v", len(g.Nodes), g.Nodes)
+	}
+	for _, n := range g.Nodes {
+		if n.ID == "aa:bb:cc:dd:ee:01" {
+			t.Fatalf("phantom MAC node should be reconciled away: %+v", g.Nodes)
+		}
+	}
+	// Both links now connect the real node IDs in both directions.
+	var ctrlToN1, n1ToCtrl bool
+	for _, l := range g.Links {
+		if l.Source == "ctrl" && l.Target == "n1" {
+			ctrlToN1 = true
+		}
+		if l.Source == "n1" && l.Target == "ctrl" {
+			n1ToCtrl = true
+		}
+	}
+	if !ctrlToN1 || !n1ToCtrl {
+		t.Fatalf("expected links between real node IDs, got %+v", g.Links)
+	}
+}
+
 func TestMergeKeepsStrongestLinkAndDropsStale(t *testing.T) {
 	clock := int64(1000)
 	agg := NewAggregator(30*time.Second, func() int64 { return clock })

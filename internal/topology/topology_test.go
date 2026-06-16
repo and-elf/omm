@@ -66,6 +66,42 @@ func TestCollectAssemblesGraph(t *testing.T) {
 	}
 }
 
+type fakeLinkMetrics map[string]LinkMetrics
+
+func (f fakeLinkMetrics) LinkMetrics(_ context.Context, iface, _ string) LinkMetrics {
+	return f[iface]
+}
+
+type fakeSelfAddrs []string
+
+func (f fakeSelfAddrs) SelfAddrs(context.Context) []string { return f }
+
+func TestCollectAttachesLinkMetricsAndSelfAddrs(t *testing.T) {
+	c := NewCollector("self-1", "Gateway",
+		fakeMesh{neighbors: []Neighbor{
+			{ID: "aa:bb", TQ: 240, Iface: "eth1", Nexthop: "n1"},
+			{ID: "cc:dd", TQ: 180, Iface: "mesh0", Nexthop: "n2"},
+		}},
+		nil, nil, nil,
+		WithLinkMetrics(fakeLinkMetrics{
+			"eth1":  {Kind: LinkWired, SpeedMbps: 2500},
+			"mesh0": {Kind: LinkWireless, Signal: -58},
+		}),
+		WithSelfAddrs(fakeSelfAddrs{"de:ad:be:ef:00:01"}),
+	)
+	g := c.Collect(context.Background())
+
+	if got := g.Nodes[0].Addrs; len(got) != 1 || got[0] != "de:ad:be:ef:00:01" {
+		t.Fatalf("expected self addrs reported, got %+v", got)
+	}
+	if g.Links[0].Kind != LinkWired || g.Links[0].SpeedMbps != 2500 {
+		t.Fatalf("expected wired link with speed, got %+v", g.Links[0])
+	}
+	if g.Links[1].Kind != LinkWireless || g.Links[1].Signal != -58 {
+		t.Fatalf("expected wireless link with rssi, got %+v", g.Links[1])
+	}
+}
+
 func TestCollectToleratesSourceErrors(t *testing.T) {
 	c := NewCollector("self-1", "", fakeMesh{err: context.DeadlineExceeded}, fakeClients{err: context.DeadlineExceeded}, nil, nil)
 	g := c.Collect(context.Background())
@@ -78,9 +114,9 @@ func TestParseOriginators(t *testing.T) {
 	// Representative `batctl o` output.
 	out := `[B.A.T.M.A.N. adv 2023.1, MainIF/MAC: eth0/de:ad:be:ef:00:01 (bat0 BATMAN_IV)]
    Originator        last-seen (#/255)  Nexthop           [outgoingIF]
- * aa:bb:cc:dd:ee:01    0.480s   (255) aa:bb:cc:dd:ee:01 [     bat0]
-   aa:bb:cc:dd:ee:02    1.020s   (181) aa:bb:cc:dd:ee:02 [     bat0]
- * aa:bb:cc:dd:ee:02    0.500s   (200) aa:bb:cc:dd:ee:02 [     bat0]
+ * aa:bb:cc:dd:ee:01    0.480s   (255) bb:bb:cc:dd:ee:01 [bat0_eth1]
+   aa:bb:cc:dd:ee:02    1.020s   (181) bb:bb:cc:dd:ee:02 [bat0_mesh]
+ * aa:bb:cc:dd:ee:02    0.500s   (200) cc:cc:cc:dd:ee:02 [bat0_mesh]
 `
 	neighbors := parseOriginators([]byte(out))
 	if len(neighbors) != 2 {
@@ -89,9 +125,18 @@ func TestParseOriginators(t *testing.T) {
 	if neighbors[0].ID != "aa:bb:cc:dd:ee:01" || neighbors[0].TQ != 255 {
 		t.Fatalf("unexpected first originator: %+v", neighbors[0])
 	}
-	// Best (highest) TQ kept for the duplicated originator.
+	// The next-hop MAC and outgoing batman hard interface ride along so the link
+	// can later be classified (wired vs wireless) and measured.
+	if neighbors[0].Nexthop != "bb:bb:cc:dd:ee:01" || neighbors[0].Iface != "bat0_eth1" {
+		t.Fatalf("expected nexthop+iface on first originator, got %+v", neighbors[0])
+	}
+	// Best (highest) TQ kept for the duplicated originator, and the nexthop/iface
+	// of that best line wins too.
 	if neighbors[1].ID != "aa:bb:cc:dd:ee:02" || neighbors[1].TQ != 200 {
 		t.Fatalf("expected best TQ 200 for ee:02, got %+v", neighbors[1])
+	}
+	if neighbors[1].Nexthop != "cc:cc:cc:dd:ee:02" || neighbors[1].Iface != "bat0_mesh" {
+		t.Fatalf("expected best line's nexthop+iface for ee:02, got %+v", neighbors[1])
 	}
 }
 

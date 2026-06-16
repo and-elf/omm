@@ -124,5 +124,70 @@ func mergeGraphs(graphs []Graph) Graph {
 	for _, k := range keys {
 		out.Links = append(out.Links, links[k])
 	}
-	return out
+	return reconcile(out)
+}
+
+// reconcile rewrites MAC-keyed endpoints to node IDs and drops the phantom MAC
+// nodes those endpoints referred to. batman-adv neighbours are keyed by
+// originator MAC, but each node self-reports under a node ID and declares its
+// batman addresses; this maps every MAC back to its owning node so the real
+// nodes connect to each other instead of to anonymous MAC blobs (issues
+// #27/#28). A MAC with no declaring node is left untouched (an unknown node).
+func reconcile(g Graph) Graph {
+	addrToID := map[string]string{}
+	for _, n := range g.Nodes {
+		for _, a := range n.Addrs {
+			addrToID[a] = n.ID
+		}
+	}
+	if len(addrToID) == 0 {
+		return g
+	}
+	canon := func(id string) string {
+		if real, ok := addrToID[id]; ok {
+			return real
+		}
+		return id
+	}
+
+	// Keep nodes that are not aliases of another node (a phantom MAC node has an
+	// ID that canonicalises to a different, real node).
+	nodes := g.Nodes[:0]
+	for _, n := range g.Nodes {
+		if canon(n.ID) == n.ID {
+			nodes = append(nodes, n)
+		}
+	}
+
+	// Rewrite link endpoints to canonical IDs, re-deduping by directed pair and
+	// keeping the strongest TQ (a rewrite can collapse two MAC/ID links into one).
+	links := map[string]Link{}
+	order := []string{}
+	for _, l := range g.Links {
+		l.Source, l.Target = canon(l.Source), canon(l.Target)
+		if l.Source == l.Target {
+			continue // a self-loop from a node listing its own other address
+		}
+		key := l.Source + "\x00" + l.Target
+		if ex, ok := links[key]; !ok || l.TQ > ex.TQ {
+			if !ok {
+				order = append(order, key)
+			}
+			links[key] = l
+		}
+	}
+	sort.Strings(order)
+	outLinks := make([]Link, 0, len(order))
+	for _, k := range order {
+		outLinks = append(outLinks, links[k])
+	}
+
+	// Rewrite client AP references too, in case a client was reported against a
+	// node's MAC rather than its ID.
+	for i := range g.Clients {
+		g.Clients[i].AP = canon(g.Clients[i].AP)
+	}
+
+	g.Nodes, g.Links = nodes, outLinks
+	return g
 }

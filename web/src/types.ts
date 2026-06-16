@@ -128,6 +128,12 @@ export interface TopologyLink {
   source: string
   target: string
   tq: number
+  /** Medium this link runs over: 'wired' | 'wireless' (absent = unknown). */
+  kind?: string
+  /** RSSI (dBm) of a wireless link; absent/0 when wired or unknown. */
+  signal?: number
+  /** Negotiated speed (Mbps) of a wired link; absent/0 when wireless. */
+  speed_mbps?: number
 }
 
 export interface TopologyClient {
