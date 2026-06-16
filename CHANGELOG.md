@@ -17,11 +17,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wizard. Network posture management (`manage_network`) stays opt-in.
 
 ### Added
+- **Zero-touch backhaul (any topology).** Plug a node in over ethernet anywhere —
+  into the controller, into another node, or leave it wireless — and it joins the
+  batman fabric with no per-node config. Every meshd broadcasts a presence beacon;
+  every node passively sniffs each wired (`br-lan`-member) port for a peer's beacon
+  and enslaves only the ports that face an OMM peer to `bat0` (taking each out of
+  `br-lan`, which is loop-safe on its own), leaving client jacks as plain bridge
+  ports. The mesh is always-on and the mesh radio is auto-selected by band
+  (2.4 GHz), so batman-adv + BLA own all path selection and loop avoidance — there
+  is **no carrier-toggle failover** (pulling a wired uplink re-routes over the mesh
+  in ~1s; replug restores wired-primary). Enslaved ports get a unique
+  locally-administered MAC so shared-MAC DSA switch ports work. A reconcile loop
+  keeps the classification live as cabling changes. `batman_ports` remains an
+  explicit override that skips the scan. (Supersedes the earlier peer-on-wire /
+  case-1-2-3 + failover approach.)
+- **batman-adv multi-hop routing.** meshd now authors a batman-adv mesh as the
+  forwarding layer instead of bridging the 802.11s mesh straight onto the LAN: a
+  `bat0` soft interface with bridge-loop-avoidance, one batadv hard interface per
+  backhaul link (the wireless mesh *and* each configured wired port,
+  `batman_ports`), and `bat0` bridged into the LAN. batman-adv forwards loop-free
+  across any mix of wired and wireless links, so chained nodes
+  (controller → wired → AP → wireless → AP → wired → device) and simultaneous
+  wired+wireless backhaul on one node now work without a bridge loop — superseding
+  the carrier-toggle failover, which is disabled when batman is active. On by
+  default (`batman`), auto-degrading to the direct mesh-on-LAN bridge when the
+  batman-adv module/netifd proto is absent; configurable via `batman`,
+  `batman_ports`, `batman_routing_algo`. Requires `kmod-batman-adv` (which ships
+  the netifd proto handlers) and `batctl` on the image.
 - **Mesh-capable `wpad` provisioning.** So 802.11s actually forms (instead of
   degrading to wired multi-AP): documented baking `wpad-mesh-*` into the firmware
   image — the reliable path that also covers offline nodes — and added
-  `scripts/deploy.sh --install-wpad-mesh`, which detects a live device's crypto
-  variant and swaps `wpad-basic-*` for the matching `wpad-mesh-*`.
+  `scripts/deploy.sh --install-dependencies`, which detects a live device's
+  crypto variant and swaps `wpad-basic-*` for the matching `wpad-mesh-*` (and
+  installs the `kmod-batman-adv`/`batctl` routing stack).
 - **Zero-config wired onboarding.** A freshly-flashed kit now comes up hands-off:
   power the first device and it becomes its own controller; cable a node and it
   discovers, enrolls, and receives its wireless — no wizard, no per-device

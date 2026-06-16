@@ -7,17 +7,19 @@ import (
 	"encoding/hex"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/and-elf/omm/internal/api"
-	"github.com/and-elf/omm/internal/backhaul"
+	"github.com/and-elf/omm/internal/batman"
 	"github.com/and-elf/omm/internal/client"
 	"github.com/and-elf/omm/internal/config"
 	"github.com/and-elf/omm/internal/deviceled"
@@ -136,11 +138,68 @@ func main() {
 		log.Printf("check home profile: %v", err)
 	}
 
+	// Auto backhaul detection: classify every wired (br-lan member) ethernet port
+	// as a batman backhaul link or a plain client port by sniffing for an OMM peer
+	// beacon on it. A peered port is enslaved to bat0 (taken out of br-lan, which
+	// is loop-safe regardless of the far end); a client jack stays a plain bridge
+	// port. The 802.11s mesh is always on — batman + BLA own path selection and
+	// loop avoidance, so there is no carrier-toggle failover. An explicit
+	// MESHD_BATMAN_PORTS overrides the scan (deliberate wiring). The controller's
+	// internet uplink is a separate interface (not a br-lan member), so it is
+	// never a candidate. The reconcile loop (below) keeps the set live as nodes
+	// and clients are plugged/unplugged; this provider feeds the current set to
+	// every ApplyProfile so re-applies stay consistent with the live state.
+	beaconPort := beaconUDPPort(cfg.UDPListen)
+	wired := &wiredPortSet{ports: cfg.BatmanPorts}
+	autoBackhaul := cfg.BatmanEnable && len(cfg.BatmanPorts) == 0
+	hasPeer := func(ctx context.Context, port string) (bool, error) {
+		return batman.SniffOMMBeacon(ctx, port, beaconPort, 4*time.Second)
+	}
+	candidates := func() []string {
+		members, err := batman.SysfsBridgePorts(lanBridgeName, nil)
+		if err != nil {
+			return nil
+		}
+		return batman.EthernetPorts(members, cfg.BatmanIface)
+	}
+	if autoBackhaul {
+		// Scan before the first apply, so the mesh comes up with peered ports
+		// already enslaved (no transient wired+mesh loop).
+		wired.set(batman.PortScan{Candidates: candidates(), HasPeer: hasPeer}.BackhaulPorts(ctx))
+		log.Printf("backhaul: initial wired backhaul ports=%v", wired.get())
+	}
+
 	profileManager := profiles.NewManager(store, uciClient, profiles.Config{
 		Radio:     cfg.SetupAPRadio,
 		MeshRadio: cfg.MeshRadio,
 		Mesh:      profiles.UbusMeshInspector{Ubus: ubusClient},
+		// batman-adv routing layer: author bat0 + a hard interface per backhaul
+		// link and wire the 802.11s mesh onto it (loop-free multi-hop across
+		// wired+wireless), degrading to the direct lan bridge when bat0 doesn't
+		// come up. LanDevice is the LAN bridge bat0 is bridged into.
+		BatmanEnable:      cfg.BatmanEnable,
+		BatmanIface:       cfg.BatmanIface,
+		BatmanRoutingAlgo: cfg.BatmanRoutingAlgo,
+		BatmanPortsFn:     wired.get,
+		LanDevice:         cfg.LanDevice,
+		BatmanMAC:         batman.SysfsMAC(nil),
+		Batman:            profiles.UbusBatmanInspector{Ubus: ubusClient},
 	})
+
+	// Keep the wired backhaul classification live: re-scan every port for an OMM
+	// peer beacon and enslave/release ports as nodes and clients are plugged in.
+	// This replaces the carrier-toggle failover — once every backhaul wire is a
+	// batman link and the mesh is always-on, batman + BLA own path selection and
+	// loop avoidance. The first scan already ran (above) before the initial apply.
+	if autoBackhaul {
+		reconciler := batman.NewManager(uciClient, batman.Config{
+			Iface:       cfg.BatmanIface,
+			RoutingAlgo: cfg.BatmanRoutingAlgo,
+			LanDevice:   cfg.LanDevice,
+			MAC:         batman.SysfsMAC(nil),
+		})
+		go reconcileBackhaulPorts(ctx, uciClient, reconciler, wired, candidates, hasPeer, 30*time.Second)
+	}
 
 	// Network posture: keep the node's network/dhcp/firewall aligned with its
 	// lifecycle (Guest dumb-AP while unclaimed so discovery works, gateway once
@@ -269,7 +328,7 @@ func main() {
 		apiURL = scheme + "://" + cfg.AnnounceAddr()
 	}
 	go func() {
-		ann := discovery.Announcement{HomeID: cfg.HomeID, Name: cfg.HomeName, ControllerID: cfg.ControllerID, API: apiURL}
+		ann := discovery.Announcement{HomeID: cfg.HomeID, Name: cfg.HomeName, ControllerID: cfg.ControllerID, API: apiURL, NodeID: id.NodeID()}
 		if err := discovery.Announce(ctx, cfg.UDPBroadcast, ann, 5*time.Second); err != nil {
 			log.Printf("controller announce error: %v", err)
 		}
@@ -357,9 +416,6 @@ func main() {
 		go reportTopologyLoop(ctx, collector, id.NodeID(), cfg.Join, meshClients, 15*time.Second)
 		// Pull profile updates from the joined controller(s) and re-apply on change.
 		go syncProfileLoop(ctx, cfg.Join, meshClients, store, profileManager, 30*time.Second)
-		// Keep ethernet prioritized: the 802.11s mesh is a standby that activates
-		// only when the wired uplink loses carrier.
-		startBackhaulFailover(ctx, uciClient, cfg.BackhaulIface)
 	}
 
 	// Bring up the first-boot setup AP while the device is unclaimed, so a
@@ -516,63 +572,107 @@ func autoSelectHome(ctx context.Context, store storage.Store, pm profiles.Profil
 	}
 }
 
-// startBackhaulFailover launches the ethernet/wireless backhaul switcher for a
-// joined node: ethernet is always preferred, and the 802.11s mesh is a standby
-// that activates only when the wired uplink loses carrier (and is torn down when
-// the wire returns, which also avoids an ethernet+mesh bridging loop).
-//
-// backhaulIface is the wired uplink whose carrier is watched. It must be a
-// discrete uplink port (e.g. "eth0"/"wan"); the LAN bridge "br-lan" (the
-// default) is not — its carrier stays up from any bridge member, so it can't
-// signal "the wire to the controller is gone". Failover therefore stays off for
-// the default and engages only once an operator sets backhaul_iface to the real
-// uplink port — leaving existing single-backhaul deployments unchanged. The
-// actuator no-ops when no mesh iface is configured (a degraded multi-AP node has
-// nothing to fail over to).
-func startBackhaulFailover(ctx context.Context, uciClient uci.Client, backhaulIface string) {
-	if backhaulIface == "" || backhaulIface == "br-lan" {
-		return
-	}
-	setMesh := func(enabled bool) func(context.Context) error {
-		return func(ctx context.Context) error {
-			if mode, err := uciClient.Get(ctx, "wireless", profiles.MeshSection, "mode"); err != nil || mode == "" {
-				return nil // no mesh configured: nothing to switch
-			}
-			disabled := "1"
-			if enabled {
-				disabled = "0"
-			}
-			if err := uciClient.Set(ctx, "wireless", profiles.MeshSection, "disabled", disabled); err != nil {
-				return err
-			}
-			if err := uciClient.Commit(ctx, "wireless"); err != nil {
-				return err
-			}
-			return uciClient.Reload(ctx)
+// lanBridgeName is the LAN bridge netdev whose member ports are scanned for
+// wired backhaul candidates. OMM always names it br-lan.
+const lanBridgeName = "br-lan"
+
+// wiredPortSet is the mutex-guarded set of wired ports currently enslaved to
+// batman. The reconcile loop owns it and ApplyProfile reads it (via get), so a
+// profile re-apply re-asserts the live set rather than a stale startup snapshot.
+type wiredPortSet struct {
+	mu    sync.Mutex
+	ports []string
+}
+
+func (w *wiredPortSet) get() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.ports...)
+}
+
+func (w *wiredPortSet) set(ports []string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.ports = ports
+}
+
+// beaconUDPPort extracts the port from a UDP listen address (e.g. ":45678" =>
+// 45678) — the port OMM presence beacons are sent to. Defaults to 45678.
+func beaconUDPPort(listen string) int {
+	if _, p, err := net.SplitHostPort(listen); err == nil {
+		if n, err := strconv.Atoi(p); err == nil {
+			return n
 		}
 	}
-	// observeMesh reports the actual backhaul from the mesh iface's enabled state
-	// so the loop reconciles each tick (a profile re-apply on a joined node's boot
-	// recreates the mesh enabled — without this the loop, having seen no carrier
-	// transition, would leave a standing ethernet+mesh bridging loop). No mesh
-	// section => "" (nothing to reconcile); enabled (disabled != "1") => wireless;
-	// explicitly disabled => ethernet.
-	observeMesh := func(ctx context.Context) string {
-		mode, err := uciClient.Get(ctx, "wireless", profiles.MeshSection, "mode")
-		if err != nil || mode == "" {
-			return ""
+	return 45678
+}
+
+// reconcileBackhaulPorts periodically re-classifies every candidate wired port
+// (OMM peer beacon present => batman backhaul; else plain client port) and
+// applies the delta: enslave newly-peered ports, release ports a peer left, then
+// commit network + reload. bat0 and the mesh are authored by ApplyProfile; this
+// only manages the wired hardifs. It supersedes the carrier-toggle failover —
+// once every backhaul wire is a batman link and the mesh is always-on, batman +
+// BLA handle path selection and loop avoidance. The first scan already ran before
+// the initial apply (so the mesh comes up with peered ports already enslaved);
+// this keeps the set live as nodes and clients are plugged/unplugged.
+func reconcileBackhaulPorts(ctx context.Context, uciClient uci.Client, bm *batman.Manager, wired *wiredPortSet, candidates func() []string, hasPeer func(context.Context, string) (bool, error), interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
-		if disabled, err := uciClient.Get(ctx, "wireless", profiles.MeshSection, "disabled"); err == nil && disabled == "1" {
-			return topology.BackhaulEthernet
+		want := batman.PortScan{Candidates: candidates(), HasPeer: hasPeer}.BackhaulPorts(ctx)
+		cur := wired.get()
+		added, removed := missing(want, cur), missing(cur, want)
+		if len(added) == 0 && len(removed) == 0 {
+			continue
 		}
-		return topology.BackhaulWireless
+		ok := true
+		for _, p := range added {
+			if err := bm.EnslavePort(ctx, p); err != nil {
+				log.Printf("backhaul: enslave %s failed: %v", p, err)
+				ok = false
+			}
+		}
+		for _, p := range removed {
+			if err := bm.ReleasePort(ctx, p); err != nil {
+				log.Printf("backhaul: release %s failed: %v", p, err)
+				ok = false
+			}
+		}
+		if !ok {
+			continue // leave wired unchanged; retry next tick
+		}
+		if err := uciClient.Commit(ctx, "network"); err != nil {
+			log.Printf("backhaul: commit network failed: %v", err)
+			continue
+		}
+		if err := uciClient.Reload(ctx); err != nil {
+			log.Printf("backhaul: reload failed: %v", err)
+			continue
+		}
+		wired.set(want)
+		log.Printf("backhaul: reconciled wired ports +%v -%v => %v", added, removed, want)
 	}
-	go backhaul.Run(ctx, backhaul.Deps{
-		Carrier:    topology.SysfsBackhaul{Iface: backhaulIface}.Backhaul,
-		Current:    observeMesh,
-		Activate:   setMesh(true),
-		Deactivate: setMesh(false),
-	})
+}
+
+// missing returns the elements of a not present in b.
+func missing(a, b []string) []string {
+	in := make(map[string]bool, len(b))
+	for _, x := range b {
+		in[x] = true
+	}
+	var out []string
+	for _, x := range a {
+		if !in[x] {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 // reportTopologyLoop periodically pushes this node's local topology to its
@@ -717,8 +817,6 @@ func autoOnboardWired(ctx context.Context, store storage.Store, collector *topol
 		go reportTopologyLoop(ctx, collector, id.NodeID(), []string{controllerURL}, clients, 15*time.Second)
 		// Pull profile updates from the controller and re-apply on change.
 		go syncProfileLoop(ctx, []string{controllerURL}, clients, store, pm, 30*time.Second)
-		// Keep ethernet prioritized once joined; the mesh stands by for failover.
-		startBackhaulFailover(ctx, uciClient, cfg.BackhaulIface)
 		if afterJoin != nil {
 			afterJoin()
 		}

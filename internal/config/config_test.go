@@ -158,3 +158,36 @@ func TestConfigAddrOverrides(t *testing.T) {
 		t.Fatalf("overrides not applied: mgmt=%q mesh=%q", c.MgmtAddr, c.MeshAddr)
 	}
 }
+
+func TestBatmanDefaultsOnAndConfigurable(t *testing.T) {
+	for _, k := range []string{"MESHD_BATMAN", "MESHD_BATMAN_PORTS", "MESHD_BATMAN_ROUTING_ALGO"} {
+		t.Setenv(k, "")
+	}
+	// batman-adv routing is on by default (auto-degrades when the module/proto is
+	// absent), with the standard routing algorithm and no extra wired ports.
+	c := Load()
+	if !c.BatmanEnable {
+		t.Error("BatmanEnable should default to true")
+	}
+	if c.BatmanRoutingAlgo != "BATMAN_IV" {
+		t.Errorf("BatmanRoutingAlgo default = %q, want BATMAN_IV", c.BatmanRoutingAlgo)
+	}
+	if len(c.BatmanPorts) != 0 {
+		t.Errorf("BatmanPorts default = %v, want empty", c.BatmanPorts)
+	}
+
+	// Explicit overrides.
+	t.Setenv("MESHD_BATMAN", "0")
+	t.Setenv("MESHD_BATMAN_PORTS", "eth0, eth1")
+	t.Setenv("MESHD_BATMAN_ROUTING_ALGO", "BATMAN_V")
+	c = Load()
+	if c.BatmanEnable {
+		t.Error("MESHD_BATMAN=0 should disable batman")
+	}
+	if c.BatmanRoutingAlgo != "BATMAN_V" {
+		t.Errorf("BatmanRoutingAlgo = %q, want BATMAN_V", c.BatmanRoutingAlgo)
+	}
+	if len(c.BatmanPorts) != 2 || c.BatmanPorts[0] != "eth0" || c.BatmanPorts[1] != "eth1" {
+		t.Errorf("BatmanPorts = %v, want [eth0 eth1]", c.BatmanPorts)
+	}
+}

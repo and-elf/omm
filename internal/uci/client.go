@@ -59,8 +59,23 @@ func (c *client) Close() error {
 	return c.ubusClient.Close()
 }
 
+// uciGetResult covers both rpcd `uci get` response shapes: a single-option get
+// returns the scalar/list under top-level "value", while a section get returns
+// every option under "values". Older notes assumed only the latter, so reads of
+// a single option silently failed on devices that use "value".
 type uciGetResult struct {
+	Value  json.RawMessage            `json:"value"`
 	Values map[string]json.RawMessage `json:"values"`
+}
+
+// raw returns the JSON value for option, preferring the single-option "value"
+// field and falling back to the per-option "values" map.
+func (r uciGetResult) raw(option string) (json.RawMessage, bool) {
+	if len(r.Value) > 0 {
+		return r.Value, true
+	}
+	v, ok := r.Values[option]
+	return v, ok
 }
 
 func (c *client) Get(ctx context.Context, packageName, section, option string) (string, error) {
@@ -77,7 +92,7 @@ func (c *client) Get(ctx context.Context, packageName, section, option string) (
 		return "", err
 	}
 
-	value, ok := result.Values[option]
+	value, ok := result.raw(option)
 	if !ok {
 		return "", fmt.Errorf("option %q not found", option)
 	}
@@ -154,24 +169,89 @@ func (c *client) Delete(ctx context.Context, packageName, section string) error 
 	return c.ubusClient.Call(ctx, "uci", "delete", params, nil)
 }
 
+// AddListItem appends value to a list-valued option, idempotently. rpcd's uci
+// ubus object has no `add_list` method (it returns "Method not found"), so we
+// read the current list and write it back with `set` — whose `values` may carry
+// an array — which every rpcd supports. A value already present is a no-op.
 func (c *client) AddListItem(ctx context.Context, packageName, section, option, value string) error {
-	params := map[string]interface{}{
-		"config":  packageName,
-		"section": section,
-		"option":  option,
-		"values":  []string{value},
+	list, err := c.getList(ctx, packageName, section, option)
+	if err != nil {
+		return err
 	}
-	return c.ubusClient.Call(ctx, "uci", "add_list", params, nil)
+	for _, v := range list {
+		if v == value {
+			return nil
+		}
+	}
+	return c.setList(ctx, packageName, section, option, append(list, value))
 }
 
+// DelListItem removes value from a list-valued option. Like AddListItem it uses
+// read-modify-write via `set` rather than the unsupported `del_list`. Removing
+// an absent value is a no-op.
 func (c *client) DelListItem(ctx context.Context, packageName, section, option, value string) error {
-	params := map[string]interface{}{
+	list, err := c.getList(ctx, packageName, section, option)
+	if err != nil {
+		return err
+	}
+	out := make([]string, 0, len(list))
+	removed := false
+	for _, v := range list {
+		if v == value {
+			removed = true
+			continue
+		}
+		out = append(out, v)
+	}
+	if !removed {
+		return nil
+	}
+	return c.setList(ctx, packageName, section, option, out)
+}
+
+// getList reads a list-valued option as a slice, returning an empty slice when
+// the option is unset. A scalar value is returned as a single-element slice.
+func (c *client) getList(ctx context.Context, packageName, section, option string) ([]string, error) {
+	var result uciGetResult
+	if err := c.ubusClient.Call(ctx, "uci", "get", map[string]string{
 		"config":  packageName,
 		"section": section,
 		"option":  option,
-		"values":  []string{value},
+	}, &result); err != nil {
+		return nil, err
 	}
-	return c.ubusClient.Call(ctx, "uci", "del_list", params, nil)
+	raw, ok := result.raw(option)
+	if !ok {
+		return nil, nil
+	}
+	var list []string
+	if err := json.Unmarshal(raw, &list); err == nil {
+		return list, nil
+	}
+	var scalar string
+	if err := json.Unmarshal(raw, &scalar); err == nil {
+		return []string{scalar}, nil
+	}
+	return nil, fmt.Errorf("parse uci list %q", option)
+}
+
+// setList writes a list-valued option in one `uci set` call, passing the values
+// as an array (rpcd sets a list option when the value is an array). An empty
+// list is written by deleting the option: `set` with an empty array is a no-op
+// on rpcd, which would otherwise leave the last removed member behind.
+func (c *client) setList(ctx context.Context, packageName, section, option string, values []string) error {
+	if len(values) == 0 {
+		return c.ubusClient.Call(ctx, "uci", "delete", map[string]string{
+			"config":  packageName,
+			"section": section,
+			"option":  option,
+		}, nil)
+	}
+	return c.ubusClient.Call(ctx, "uci", "set", map[string]interface{}{
+		"config":  packageName,
+		"section": section,
+		"values":  map[string]interface{}{option: values},
+	}, nil)
 }
 
 func (c *client) Commit(ctx context.Context, packageName string) error {

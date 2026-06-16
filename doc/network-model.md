@@ -78,15 +78,85 @@ wired uplink** — e.g. a garage AP reached only over the air — and the only t
 that supports:
 
 * **Wireless backhaul** — a node joins the network with no ethernet run.
-* **Chained nodes** — multi-hop paths (node → node → gateway) via 802.11s HWMP.
+* **Chained nodes** — multi-hop paths (node → node → gateway).
 * **Node mobility** — a relocated node re-attaches over the air.
 
-> Multi-hop reliability and the topology view (`batctl`) assume **batman-adv**
-> layered on the mesh interface. That layer is documented in
-> [architecture.md](architecture.md) but not yet authored by `ApplyProfile`
-> (today the mesh interface is bridged directly onto `lan`), so chaining beyond
-> a single hop is not yet guaranteed. Single-hop wireless backhaul (house →
-> garage) works with 802.11s alone.
+#### batman-adv routing layer
+
+When batman-adv is enabled (`MESHD_BATMAN`, default on where the kernel module
+is present), `ApplyProfile` does **not** bridge the mesh interface straight onto
+`lan`. Instead it authors a batman-adv mesh and bridges that:
+
+* A **soft interface** `bat0` (`proto 'batadv'`) with **bridge-loop-avoidance**
+  on. BLA is what lets a node carry *both* a wired link and the wireless mesh at
+  once without a broadcast storm — batman detects the redundant L2 path and
+  dedups it, where plain bridge STP could not (the consumer switches in the home
+  kit do not forward STP BPDUs across the wired path).
+* One **hard interface** (`proto 'batadv_hardif'`, `master 'bat0'`) per backhaul
+  link enslaved to the mesh: the 802.11s `omm_mesh` vif **and** the node's wired
+  backhaul uplink. batman-adv treats wired and wireless links uniformly and
+  computes the best loop-free path across the mix.
+* `bat0` is the only batman device bridged into `br-lan`; DHCP and clients ride
+  on top of it.
+
+**Auto backhaul detection (zero-touch, any topology).** No node needs its
+backhaul ports named in config. Every meshd broadcasts a small **presence
+beacon** to the discovery UDP port, and every node continuously classifies each
+of its wired (`br-lan`-member) ethernet ports by **passively sniffing that port
+for a peer's beacon** (a raw `AF_PACKET` listener that ignores its own outgoing
+frames — it neither enslaves the port nor transmits, so it is safe while the port
+is a plain bridge member):
+
+* **Port with an OMM peer beacon** → enslaved to `bat0` as a batadv hardif and
+  taken *out* of `br-lan` (a device in both `br-lan` and batman is the redundant
+  L2 path that storms). Each enslaved port also gets a unique locally-administered
+  MAC, so shared-MAC DSA switch ports don't collide on `bat0`.
+* **Port with no beacon** (a plain client device, or nothing) → left a normal
+  `br-lan` client port, so wired clients get DHCP on `bat0` as usual.
+
+The **802.11s mesh is always on**, and the mesh radio is **auto-selected by band**
+(2.4 GHz — the only legal/interoperable mesh band on this gear). Because every
+inter-node wire is a batman link and the mesh is always up, **batman-adv + BLA own
+all path selection and loop avoidance** — there is no carrier-toggle failover.
+Pulling a wired uplink just drops that hardif's carrier and batman re-routes over
+the mesh within a second; replugging restores the wire as primary.
+
+This is bootstrap-safe and needs no manual sequencing: beacons are independent of
+batman, so two wired OMM nodes each see the other and enslave their own side
+(taking it out of `br-lan` — loop-safe regardless of the far end), and the
+controller auto-enslaves the port facing a node exactly the same way. A reconcile
+loop re-runs the scan periodically, so ports promote/demote as nodes and clients
+are plugged and unplugged.
+
+> The one topology this can't serve: a single physical port carrying **both** an
+> OMM node **and** plain client devices (a shared dumb switch) — a port is either a
+> batman backhaul link or a client bridge port, not both. Point-to-point
+> node↔node, or node↔clients-per-port, are fine.
+
+> `MESHD_BATMAN_PORTS` remains an explicit override: when set, those ports are
+> enslaved directly and the auto-scan/reconcile is skipped.
+
+Because batman-adv forwards at layer 2.5 across *any* mix of enslaved links, a
+node need not distinguish "edge" from "relay": a wired node automatically keeps
+relaying for a wireless child, and a chain like
+
+```text
+controller ──wired──▶ AP ──wireless──▶ AP ──wired──▶ device
+```
+
+is just a route batman-adv selects. This supersedes the per-node
+"disable the mesh while my own wire is up" failover (a workaround for the
+bridge loop), which is **not used** when batman-adv is active.
+
+> Without batman-adv (module absent, or `MESHD_BATMAN=0`) the mesh interface is
+> bridged directly onto `lan` as before: single-hop wireless backhaul (house →
+> garage) works, but multi-hop chaining and simultaneous wired+wireless on one
+> node are not guaranteed.
+
+The layer needs `kmod-batman-adv` (kernel module + netifd proto handlers) and
+`batctl` on each device, and — because netifd loads proto handlers only at
+startup — a netifd restart after installing them. See
+[Routing layer requirements](openwrt.md#routing-layer-requirements-batman-adv).
 
 ### Tier 2 — wired multi-AP (degraded)
 
@@ -119,10 +189,12 @@ with a reason and remediation. The outcome is persisted and surfaced:
   reason and the `wpad-mesh` remediation; degraded nodes are marked in the graph.
 
 > **Status.** Implemented: the apply-time verification, automatic degrade,
-> `/status` backhaul, and per-node `mesh_mode` in topology + LuCI. Still
-> follow-up: declaring/installing a mesh-capable `wpad` from the package, and the
-> batman-adv multi-hop layer (today the mesh is bridged directly onto `lan`, so
-> chaining beyond a single hop is not yet guaranteed).
+> `/status` backhaul, per-node `mesh_mode` in topology + LuCI, and the
+> **batman-adv routing layer** (`bat0` soft interface with bridge-loop-avoidance,
+> a hard interface per wireless/wired backhaul link, `bat0` bridged into
+> `br-lan`) authored by `ApplyProfile` when enabled. Still follow-up:
+> declaring/installing a mesh-capable `wpad` from the package, and live
+> multi-hop validation on the home kit.
 
 ---
 

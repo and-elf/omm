@@ -66,6 +66,21 @@ type Config struct {
 	APInterfaces  []string // hostapd interfaces to read clients from
 	BackhaulIface string   // iface whose carrier classifies backhaul (default "br-lan"; e.g. eth0/wan); empty => unknown
 
+	// batman-adv routing layer. When enabled, ApplyProfile authors a batman-adv
+	// mesh (bat0 soft interface + a hard interface per backhaul link) and bridges
+	// bat0 into the LAN, instead of bridging the 802.11s mesh straight onto lan —
+	// giving loop-free multi-hop forwarding across any mix of wired and wireless
+	// links. Default on; it auto-degrades to the direct mesh-on-lan bridge when
+	// the batman-adv module/netifd proto is absent. A joined node auto-detects its
+	// wired backhaul uplink (the `wan` jack toward the controller, when cabled) and
+	// enslaves only that to bat0, taking it out of br-lan; client jacks stay bridge
+	// ports. BatmanPorts (MESHD_BATMAN_PORTS) is an explicit override for deliberate
+	// wiring (e.g. a controller's downstream wired port, which auto-detection never
+	// touches). See doc/network-model.md.
+	BatmanEnable      bool
+	BatmanPorts       []string
+	BatmanRoutingAlgo string
+
 	// Network posture: meshd manages network/dhcp/firewall by lifecycle state
 	// (unclaimed -> Guest dumb-AP so discovery works; claimed controller ->
 	// gateway; joined node -> mesh node). Opt-in (default false) because it
@@ -154,6 +169,10 @@ func Load() Config {
 		BatmanIface:   envOr("MESHD_BATMAN_IFACE", "bat0"),
 		APInterfaces:  splitList(os.Getenv("MESHD_AP_IFACES")),
 		BackhaulIface: envOr("MESHD_BACKHAUL_IFACE", "br-lan"),
+
+		BatmanEnable:      envBoolOr("MESHD_BATMAN", true),
+		BatmanPorts:       splitList(os.Getenv("MESHD_BATMAN_PORTS")),
+		BatmanRoutingAlgo: envOr("MESHD_BATMAN_ROUTING_ALGO", "BATMAN_IV"),
 
 		ManageNetwork: envBool("MESHD_MANAGE_NETWORK"),
 		UplinkPort:    os.Getenv("MESHD_UPLINK_PORT"),

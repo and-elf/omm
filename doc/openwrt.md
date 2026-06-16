@@ -66,13 +66,18 @@ Get a mesh-capable `wpad` onto each mesh device one of three ways:
     PACKAGES="meshd luci-app-meshd -wpad-basic-mbedtls wpad-mesh-mbedtls"
   ```
   (Match your image's crypto backend: `-mbedtls`/`-wolfssl`/`-openssl`. The
-  leading `-` drops the default basic variant it conflicts with.) Optional for
-  multi-hop/topology: add `kmod-batman-adv batctl`.
+  leading `-` drops the default basic variant it conflicts with.) For multi-hop
+  routing add the batman-adv stack: `kmod-batman-adv` (the kernel module, which
+  also ships the netifd `batadv`/`batadv_hardif` protocol handlers meshd authors
+  — there is no separate userspace `batman-adv` package) and `batctl` (topology
+  reads). Without these meshd falls back to bridging the mesh directly onto `lan`
+  (single-hop only).
 
 - **On a live device** (online — e.g. a controller, or a node after it has
-  joined the home LAN): `scripts/deploy.sh <host> --install-wpad-mesh` detects
-  the package manager **and** the installed crypto variant and swaps
-  `wpad-basic-*` for the matching `wpad-mesh-*`. Or by hand:
+  joined the home LAN): `scripts/deploy.sh <host> --install-dependencies` detects
+  the package manager, swaps `wpad-basic-*` for the matching `wpad-mesh-*` (by
+  the installed crypto variant), and installs the `kmod-batman-adv`/`batctl`
+  routing stack. Or by hand:
 
   ```sh
   # OpenWrt 25+/snapshot (apk) — apk swaps the conflicting wpad provider for you:
@@ -99,6 +104,43 @@ node degrades to the wired multi-AP tier (`omm_ap` on `lan`) — see
 [Tier 2](network-model.md#tier-2--wired-multi-ap-degraded). A node reached only
 over the air (e.g. a detached garage AP) therefore **requires** a mesh-capable
 `wpad`.
+
+## Routing layer requirements (batman-adv)
+
+For loop-free **multi-hop** routing (and to run a wired link and the wireless
+mesh on the same node without a bridge loop), meshd authors a **batman-adv**
+layer — a `bat0` soft interface and a batadv hard interface per backhaul link —
+instead of bridging the mesh straight onto `lan`. See the
+[batman-adv routing layer](network-model.md#batman-adv-routing-layer). This needs
+two packages on each mesh device:
+
+| Package | Why |
+|---------|-----|
+| `kmod-batman-adv` | The kernel module **and** the netifd `batadv` / `batadv_hardif` protocol handlers (`/lib/netifd/proto/batadv*.sh`) that meshd drives via UCI. There is **no** separate userspace `batman-adv` package — the proto handlers ship inside the kmod. |
+| `batctl` | Userspace control/inspection tool; meshd reads mesh originators (`batctl o`) for the topology view. |
+
+Bake them into the image alongside `wpad-mesh-*` (see the image-builder line
+above), or install on a live device with
+`scripts/deploy.sh <host> --install-dependencies`.
+
+> **Gotcha: restart netifd after installing.** netifd loads its protocol handlers
+> **only at process start**. If `kmod-batman-adv` is installed *after* netifd is
+> already running, the running netifd does not know the `batadv` proto: the
+> `bat0` interface stays `proto none` and the device is never created, so meshd's
+> verification degrades it to the direct `lan` bridge. A plain `network reload`
+> (or `ubus call network reload`) does **not** reload proto handlers — only a
+> netifd restart (`/etc/init.d/network restart`) or a reboot does.
+> `--install-dependencies` restarts netifd for exactly this reason; a baked-in
+> image avoids the problem entirely (the handlers are present at first boot).
+
+> **Why it isn't a hard package dependency.** `kmod-batman-adv` is a
+> board-/kernel-specific module, and a radio-less or single-uplink wired node
+> never needs the routing layer. So — like the `wpad-mesh` requirement above — it
+> is documented and opt-in rather than a `DEPENDS`. batman-adv stays **on by
+> default** (`MESHD_BATMAN`) and **degrades gracefully**: when the module/proto is
+> absent, meshd verifies that `bat0` did not come up and bridges the mesh directly
+> onto `lan` (single-hop), so a node without the stack still works — it just
+> cannot route multi-hop.
 
 ## Status LED
 
