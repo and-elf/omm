@@ -1,6 +1,7 @@
 package ubus
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -74,6 +75,14 @@ func (c *client) Call(ctx context.Context, object, method string, params interfa
 	}
 
 	if result != nil {
+		// rpcd answers with an empty body (exit 0, no stdout) when a call has no
+		// payload to return — e.g. `uci get` of an option or section that is
+		// unset. Leave result at its zero value rather than failing to parse ""
+		// as JSON, which otherwise makes every read of an absent option fail with
+		// "unexpected end of JSON input".
+		if len(bytes.TrimSpace(output)) == 0 {
+			return nil
+		}
 		if err := json.Unmarshal(output, result); err != nil {
 			return fmt.Errorf("parse ubus response: %w", err)
 		}
