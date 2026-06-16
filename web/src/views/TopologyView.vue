@@ -52,9 +52,15 @@ const style: cytoscape.StylesheetStyle[] = [
       width: 2,
     },
   },
-  { selector: '.link--good, .assoc--good', style: { 'line-color': '#4ade80' } },
+  // Quality colour by RSSI/TQ tier (shared by mesh links and client assocs).
+  { selector: '.link--excellent, .assoc--excellent', style: { 'line-color': '#4ade80' } },
+  { selector: '.link--good, .assoc--good', style: { 'line-color': '#86efac' } },
   { selector: '.link--fair, .assoc--fair', style: { 'line-color': '#facc15' } },
   { selector: '.link--weak, .assoc--weak', style: { 'line-color': '#f87171' } },
+  // Backhaul medium: wired links draw solid (cyan, matching the wired node
+  // border), wireless links draw dashed. Client associations stay dashed.
+  { selector: '.link--wired', style: { 'line-style': 'solid', 'line-color': '#22d3ee', width: 3 } },
+  { selector: '.link--wireless', style: { 'line-style': 'dashed' } },
   { selector: '.assoc', style: { 'line-style': 'dashed' } },
 ]
 
@@ -106,6 +112,9 @@ onBeforeUnmount(() => cy.value?.destroy())
       <span><i class="dot dot--node"></i> mesh node</span>
       <span><i class="dot dot--client"></i> client</span>
       <span><i class="dot dot--multiap"></i> multi-AP (no 802.11s) ⚠</span>
+      <span><i class="line line--wired"></i> wired (solid · speed)</span>
+      <span><i class="line line--wireless"></i> wireless (dashed · RSSI)</span>
+      <span><i class="line line--excellent"></i> excellent</span>
       <span><i class="line line--good"></i> good</span>
       <span><i class="line line--fair"></i> fair</span>
       <span><i class="line line--weak"></i> weak</span>
@@ -158,16 +167,27 @@ onBeforeUnmount(() => cy.value?.destroy())
 }
 .line {
   width: 16px;
-  height: 3px;
+  height: 0;
   display: inline-block;
+  border-top: 3px solid var(--muted);
+}
+.line--wired {
+  border-top-style: solid;
+  border-top-color: #22d3ee;
+}
+.line--wireless {
+  border-top-style: dashed;
+}
+.line--excellent {
+  border-top-color: #4ade80;
 }
 .line--good {
-  background: #4ade80;
+  border-top-color: #86efac;
 }
 .line--fair {
-  background: #facc15;
+  border-top-color: #facc15;
 }
 .line--weak {
-  background: #f87171;
+  border-top-color: #f87171;
 }
 </style>

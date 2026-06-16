@@ -44,22 +44,24 @@ func (b BatctlMesh) Neighbors(ctx context.Context) ([]Neighbor, error) {
 }
 
 var (
-	macRe = regexp.MustCompile(`([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}`)
-	tqRe  = regexp.MustCompile(`\((\s*\d+)\)`)
+	macRe   = regexp.MustCompile(`([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}`)
+	tqRe    = regexp.MustCompile(`\((\s*\d+)\)`)
+	ifaceRe = regexp.MustCompile(`\[\s*([^\]\s]+)\s*\]`)
 )
 
 // parseOriginators parses `batctl o` output. Each originator line carries the
-// originator MAC, a "(TQ)" transmit quality, and a nexthop MAC. Lines marked
-// with "*" are the currently-selected route. We keep the best TQ seen per
-// originator.
+// originator MAC, a "(TQ)" transmit quality, a nexthop MAC, and an outgoing
+// batman hard interface in brackets. Lines marked with "*" are the
+// currently-selected route. We keep the best-TQ line per originator and carry
+// that line's nexthop/iface so the link can later be classified and measured.
 func parseOriginators(out []byte) []Neighbor {
-	best := map[string]int{}
+	best := map[string]Neighbor{}
 	order := []string{}
 
 	for _, line := range strings.Split(string(out), "\n") {
 		macs := macRe.FindAllString(line, -1)
 		tq := tqRe.FindStringSubmatch(line)
-		if len(macs) == 0 || tq == nil {
+		if len(macs) < 2 || tq == nil {
 			continue
 		}
 		originator := strings.ToLower(macs[0])
@@ -67,17 +69,21 @@ func parseOriginators(out []byte) []Neighbor {
 		if err != nil {
 			continue
 		}
-		if cur, ok := best[originator]; !ok || quality > cur {
+		n := Neighbor{ID: originator, TQ: quality, Nexthop: strings.ToLower(macs[1])}
+		if m := ifaceRe.FindStringSubmatch(line); m != nil {
+			n.Iface = m[1]
+		}
+		if cur, ok := best[originator]; !ok || quality > cur.TQ {
 			if !ok {
 				order = append(order, originator)
 			}
-			best[originator] = quality
+			best[originator] = n
 		}
 	}
 
 	neighbors := make([]Neighbor, 0, len(order))
 	for _, mac := range order {
-		neighbors = append(neighbors, Neighbor{ID: mac, TQ: best[mac]})
+		neighbors = append(neighbors, best[mac])
 	}
 	return neighbors
 }

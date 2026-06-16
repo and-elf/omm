@@ -1,15 +1,54 @@
 import { describe, expect, it } from 'vitest'
-import { signalClass, toElements, tqClass } from './topology'
+import { signalClass, speedLabel, toElements, tqClass } from './topology'
 
 describe('topology element builder', () => {
-  it('classifies signal and tq', () => {
-    expect(signalClass(-50)).toBe('good')
-    expect(signalClass(-70)).toBe('fair')
+  it('classifies signal across four tiers', () => {
+    expect(signalClass(-45)).toBe('excellent')
+    expect(signalClass(-55)).toBe('good')
+    expect(signalClass(-68)).toBe('fair')
     expect(signalClass(-85)).toBe('weak')
     expect(signalClass(0)).toBe('unknown')
+  })
+
+  it('classifies tq', () => {
     expect(tqClass(255)).toBe('good')
     expect(tqClass(150)).toBe('fair')
     expect(tqClass(50)).toBe('weak')
+  })
+
+  it('formats wired link speed', () => {
+    expect(speedLabel(10000)).toBe('10G')
+    expect(speedLabel(5000)).toBe('5G')
+    expect(speedLabel(2500)).toBe('2.5G')
+    expect(speedLabel(1000)).toBe('1G')
+    expect(speedLabel(100)).toBe('100M')
+    expect(speedLabel(0)).toBe('')
+    expect(speedLabel(undefined)).toBe('')
+  })
+
+  it('renders wired links solid with a speed label and wireless dashed with rssi', () => {
+    const els = toElements({
+      nodes: [
+        { id: 'ctrl', label: 'Gateway', role: 'self' },
+        { id: 'n1', label: 'Kitchen', role: 'node' },
+        { id: 'n2', label: 'Office', role: 'node' },
+      ],
+      links: [
+        { source: 'ctrl', target: 'n1', tq: 255, kind: 'wired', speed_mbps: 2500 },
+        { source: 'ctrl', target: 'n2', tq: 200, kind: 'wireless', signal: -58 },
+      ],
+      clients: null,
+    })
+
+    const wired = els.find((e) => e.data.id === 'link:ctrl->n1')
+    expect(wired?.classes).toContain('link--wired')
+    expect(wired?.classes).not.toContain('link--wireless')
+    expect(wired?.data.label).toBe('2.5G')
+
+    const wireless = els.find((e) => e.data.id === 'link:ctrl->n2')
+    expect(wireless?.classes).toContain('link--wireless')
+    expect(wireless?.classes).toContain('link--good')
+    expect(wireless?.data.label).toBe('-58 dBm · good')
   })
 
   it('builds nodes, links and client associations', () => {

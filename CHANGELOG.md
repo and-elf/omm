@@ -16,7 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   node joins it. Set `adopt_policy=off` / `auto_onboard_wired=0` to require the
   wizard. Network posture management (`manage_network`) stays opt-in.
 
+### Fixed
+- **Topology view now draws lines between the real nodes (#27/#28).** batman-adv
+  lists neighbours by originator MAC while each node self-reports under a node ID,
+  so links pointed at anonymous MAC blobs and the real nodes never connected. Each
+  node now reports its batman address(es) (`addrs`, read from
+  `/sys/class/net/<bat-iface>/address`) and the aggregator rewrites MAC-keyed link
+  endpoints to the owning node ID, dropping the redundant MAC nodes.
+
 ### Added
+- **Link type and quality in the topology graph (#28).** Each mesh link now
+  carries its medium and a metric: `kind` (`wired`/`wireless`, derived from the
+  outgoing batman hard interface in `batctl o`), `speed_mbps` for wired links
+  (read from `/sys/class/net/<iface>/speed`), and `signal` (RSSI) for wireless
+  links (read from `iw … station dump`). The Topology view draws wired links solid
+  with the speed (`1G`/`2.5G`/`5G`/`10G`) and wireless links dashed, coloured by a
+  four-tier RSSI quality (`excellent`/`good`/`fair`/`weak`) and labelled with the
+  signal. New `internal/topology/link.go` and `identity.go`.
 - **Zero-touch backhaul (any topology).** Plug a node in over ethernet anywhere —
   into the controller, into another node, or leave it wireless — and it joins the
   batman fabric with no per-node config. Every meshd broadcasts a presence beacon;

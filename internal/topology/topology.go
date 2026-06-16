@@ -21,7 +21,20 @@ type Node struct {
 	// Like Backhaul it is set on the reporting node's "self" vertex and rides
 	// along through aggregation so the controller can show each node's mode.
 	MeshMode string `json:"mesh_mode,omitempty"`
+	// Addrs are the batman-adv addresses (originator MACs) by which this node is
+	// known to its peers. A node reports its own addresses on its "self" vertex
+	// so the aggregator can rewrite the MAC-keyed links in other nodes' reports
+	// back to this node's ID — without it, every node's neighbours appear as
+	// anonymous MAC blobs and the real nodes never connect (issues #27/#28).
+	Addrs []string `json:"addrs,omitempty"`
 }
+
+// Link kinds: the medium a mesh link runs over, driving solid (wired) vs dashed
+// (wireless) rendering in the topology view.
+const (
+	LinkWired    = "wired"
+	LinkWireless = "wireless"
+)
 
 // Link is a mesh link between two nodes with its batman-adv transmit quality
 // (TQ, 0-255; higher is better).
@@ -29,6 +42,16 @@ type Link struct {
 	Source string `json:"source"`
 	Target string `json:"target"`
 	TQ     int    `json:"tq"`
+	// Kind is the medium this link runs over: "wired" or "wireless" (empty when
+	// unclassified). batman-adv may carry a neighbour over either, so it is
+	// derived from the originator's outgoing batman hard interface.
+	Kind string `json:"kind,omitempty"`
+	// Signal is the RSSI (dBm, negative) of a wireless link; 0/omitted when the
+	// link is wired or the signal is unknown.
+	Signal int `json:"signal,omitempty"`
+	// SpeedMbps is the negotiated speed of a wired link in Mbps (e.g. 1000,
+	// 2500, 5000, 10000); 0/omitted when the link is wireless or unknown.
+	SpeedMbps int `json:"speed_mbps,omitempty"`
 }
 
 // Client is a station associated to a node's AP, with its signal (RSSI, dBm).
@@ -50,13 +73,41 @@ type Graph struct {
 
 // Neighbor is a batman-adv originator reachable from this node.
 type Neighbor struct {
-	ID string
+	ID string // originator MAC (the remote node's bat0 address)
 	TQ int
+	// Nexthop is the MAC of the next hop towards this originator and Iface the
+	// local outgoing batman hard interface; both are used to classify the link
+	// (wired vs wireless) and look up its speed or RSSI.
+	Nexthop string
+	Iface   string
 }
 
 // MeshSource yields this node's mesh neighbors (batman-adv).
 type MeshSource interface {
 	Neighbors(ctx context.Context) ([]Neighbor, error)
+}
+
+// LinkMetrics describes the physical medium of a mesh link to a neighbour: its
+// kind (wired/wireless), and either the wired speed (Mbps) or the wireless RSSI
+// (dBm). Fields are best-effort — zero values mean "unknown".
+type LinkMetrics struct {
+	Kind      string
+	SpeedMbps int
+	Signal    int
+}
+
+// LinkMetricsSource classifies a mesh link given the local outgoing batman hard
+// interface and the next-hop MAC towards the originator. Implementations
+// degrade gracefully: an unclassifiable link yields a zero-value LinkMetrics.
+type LinkMetricsSource interface {
+	LinkMetrics(ctx context.Context, iface, nexthop string) LinkMetrics
+}
+
+// SelfAddrsSource yields the batman-adv addresses by which this node is known to
+// its peers (typically its bat0 interface MAC), so the aggregator can map
+// MAC-keyed links back to this node.
+type SelfAddrsSource interface {
+	SelfAddrs(ctx context.Context) []string
 }
 
 // ClientSource yields the wireless clients associated to this node.
@@ -73,21 +124,38 @@ type MeshModeSource interface {
 
 // Collector assembles a Graph from this node's point of view.
 type Collector struct {
-	selfID    string
-	selfLabel string
-	mesh      MeshSource
-	clients   ClientSource
-	backhaul  BackhaulSource
-	meshMode  MeshModeSource
+	selfID      string
+	selfLabel   string
+	mesh        MeshSource
+	clients     ClientSource
+	backhaul    BackhaulSource
+	meshMode    MeshModeSource
+	linkMetrics LinkMetricsSource
+	selfAddrs   SelfAddrsSource
 }
 
+// Option configures optional collector sources added after the core ones.
+type Option func(*Collector)
+
+// WithLinkMetrics classifies each mesh link's medium (wired/wireless) and reads
+// its speed or RSSI.
+func WithLinkMetrics(s LinkMetricsSource) Option { return func(c *Collector) { c.linkMetrics = s } }
+
+// WithSelfAddrs reports this node's batman-adv addresses so the aggregator can
+// reconcile MAC-keyed links to this node's ID.
+func WithSelfAddrs(s SelfAddrsSource) Option { return func(c *Collector) { c.selfAddrs = s } }
+
 // NewCollector builds a collector. mesh, clients, backhaul and/or meshMode may
-// be nil.
-func NewCollector(selfID, selfLabel string, mesh MeshSource, clients ClientSource, backhaul BackhaulSource, meshMode MeshModeSource) *Collector {
+// be nil; further optional sources are supplied via Options.
+func NewCollector(selfID, selfLabel string, mesh MeshSource, clients ClientSource, backhaul BackhaulSource, meshMode MeshModeSource, opts ...Option) *Collector {
 	if selfLabel == "" {
 		selfLabel = selfID
 	}
-	return &Collector{selfID: selfID, selfLabel: selfLabel, mesh: mesh, clients: clients, backhaul: backhaul, meshMode: meshMode}
+	c := &Collector{selfID: selfID, selfLabel: selfLabel, mesh: mesh, clients: clients, backhaul: backhaul, meshMode: meshMode}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 // Collect gathers the current topology. Source errors are tolerated so a
@@ -104,6 +172,12 @@ func (c *Collector) Collect(ctx context.Context) Graph {
 		g.Nodes[0].MeshMode = c.meshMode.MeshMode(ctx)
 	}
 
+	// This node's own batman addresses, so a peer's MAC-keyed link to us can be
+	// rewritten to our node ID during aggregation.
+	if c.selfAddrs != nil {
+		g.Nodes[0].Addrs = c.selfAddrs.SelfAddrs(ctx)
+	}
+
 	if c.mesh != nil {
 		if neighbors, err := c.mesh.Neighbors(ctx); err == nil {
 			for _, n := range neighbors {
@@ -114,7 +188,14 @@ func (c *Collector) Collect(ctx context.Context) Graph {
 					g.Nodes = append(g.Nodes, Node{ID: n.ID, Label: n.ID, Role: "node"})
 					seen[n.ID] = true
 				}
-				g.Links = append(g.Links, Link{Source: c.selfID, Target: n.ID, TQ: n.TQ})
+				link := Link{Source: c.selfID, Target: n.ID, TQ: n.TQ}
+				if c.linkMetrics != nil {
+					m := c.linkMetrics.LinkMetrics(ctx, n.Iface, n.Nexthop)
+					link.Kind = m.Kind
+					link.Signal = m.Signal
+					link.SpeedMbps = m.SpeedMbps
+				}
+				g.Links = append(g.Links, link)
 			}
 		}
 	}

@@ -55,6 +55,51 @@ a dashed border.
 
 ---
 
+## Link Identity (MAC ↔ node reconciliation)
+
+batman-adv lists neighbours by their **originator MAC** (a bat0 address), but
+every node self-reports its graph under its **node ID**. Left unreconciled, a
+controller's link points at an anonymous MAC blob and the real nodes never
+connect — there are no lines between them.
+
+To fix this each node reports the batman addresses it is known by, on its `self`
+vertex:
+
+```json
+{ "id": "n1", "label": "Kitchen", "role": "self", "addrs": ["aa:bb:cc:dd:ee:01"] }
+```
+
+The aggregator builds a MAC→node-ID index from every report's `addrs`, rewrites
+each link's MAC endpoints to the owning node ID, and drops the now-redundant MAC
+nodes. A MAC no node has claimed is left as-is (an as-yet-unknown node). The
+node address is read from `/sys/class/net/<bat-iface>/address`.
+
+---
+
+## Link Type and Quality
+
+Each mesh link carries the medium it runs over and a quality metric, so the view
+can distinguish a wired backhaul from a wireless hop:
+
+```json
+{ "source": "ctrl", "target": "n1", "tq": 255, "kind": "wired",     "speed_mbps": 2500 }
+{ "source": "ctrl", "target": "n2", "tq": 200, "kind": "wireless",  "signal": -58 }
+```
+
+`kind` is derived from the link's outgoing batman hard interface (parsed from the
+`[outgoingIF]` column of `batctl o`): an interface with a `phy80211` in sysfs is
+`wireless`, otherwise `wired`. A wired link reads its negotiated speed from
+`/sys/class/net/<iface>/speed` (Mbps); a wireless link reads the next-hop peer's
+RSSI from `iw dev <iface> station dump`. Both degrade to absent when the tools
+or files are unavailable.
+
+The Topology view draws **wired links solid**, labelled with the speed
+(`1G`/`2.5G`/`5G`/`10G`), and **wireless links dashed**, coloured by RSSI quality
+(`excellent`/`good`/`fair`/`weak`) and labelled with the signal (`-58 dBm · good`).
+A link of unknown medium falls back to a batman `TQ` label.
+
+---
+
 ## Topology View
 
 ```mermaid
