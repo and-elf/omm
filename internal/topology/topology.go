@@ -27,6 +27,37 @@ type Node struct {
 	// back to this node's ID — without it, every node's neighbours appear as
 	// anonymous MAC blobs and the real nodes never connect (issues #27/#28).
 	Addrs []string `json:"addrs,omitempty"`
+	// Status is the node's liveness, derived by the aggregator from how recently
+	// the controller heard from it: StatusAlive (reporting within the freshness
+	// window), StatusStale (was reporting, now overdue) or StatusDown (onboarded
+	// but silent). Empty means alive — the UI treats it as such. This is what
+	// surfaces an onboarded-but-not-alive node as a dimmed/crossed-out vertex
+	// instead of letting it silently vanish from the graph (#29).
+	Status string `json:"status,omitempty"`
+	// LastSeen is the unix time (seconds) the controller last had a signal from
+	// this node: its own most recent pushed report, or — for a node that has gone
+	// quiet — its inventory record. 0/omitted when unknown.
+	LastSeen int64 `json:"last_seen,omitempty"`
+}
+
+// Node liveness states (Node.Status), derived by the aggregator from report
+// freshness against the alive/stale windows. Alive nodes participate fully in
+// the graph; stale and down nodes are onboarded inventory the controller has
+// stopped (or never started) hearing from, surfaced as isolated vertices.
+const (
+	StatusAlive = "alive"
+	StatusStale = "stale"
+	StatusDown  = "down"
+)
+
+// InventoryNode is an onboarded node the controller knows about (from its node
+// inventory), independent of whether it is currently reporting. Merge unions
+// these with live reports so a node that onboarded but went silent appears as a
+// stale/down vertex rather than disappearing.
+type InventoryNode struct {
+	ID       string
+	Label    string
+	LastSeen int64
 }
 
 // Link kinds: the medium a mesh link runs over, driving solid (wired) vs dashed

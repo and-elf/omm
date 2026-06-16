@@ -117,7 +117,7 @@ func WithSelfHome(homeID string) Option {
 func WithTopology(collector *topology.Collector) Option {
 	return func(h *apiHandler) {
 		h.topology = collector
-		h.topoAgg = topology.NewAggregator(90*time.Second, nil)
+		h.topoAgg = topology.NewAggregator(90*time.Second, 5*time.Minute, nil)
 	}
 }
 

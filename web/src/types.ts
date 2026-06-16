@@ -122,6 +122,10 @@ export interface TopologyNode {
   backhaul?: string
   /** Wireless-backhaul mode: '802.11s' | 'multi_ap' | 'unknown'. */
   mesh_mode?: string
+  /** Liveness: 'alive' | 'stale' | 'down' (absent = alive). */
+  status?: string
+  /** Unix seconds the controller last heard from this node (absent = unknown). */
+  last_seen?: number
 }
 
 export interface TopologyLink {

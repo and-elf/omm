@@ -100,6 +100,40 @@ A link of unknown medium falls back to a batman `TQ` label.
 
 ---
 
+## Node Liveness (onboarded vs alive)
+
+A node that has onboarded but is not currently reporting — powered off, meshd
+down, or the mesh failed to form — used to **vanish** from the graph: the
+aggregator dropped reports older than its freshness window and the node simply
+disappeared, giving no signal that something is wrong (#29).
+
+The aggregator now keeps onboarded nodes visible and tags each with a `status`
+and a `last_seen` (unix seconds):
+
+```json
+{ "id": "n3", "label": "Hallway", "role": "node", "status": "stale", "last_seen": 1718539200 }
+```
+
+- **`alive`** — reporting within the freshness window (`ttl`, 90 s). Alive nodes
+  contribute their links and clients to the graph as before.
+- **`stale`** — last heard from past `ttl` but within the stale window
+  (`staleTTL`, 5 min). Shown as an isolated, dimmed vertex; its now-untrustworthy
+  links are **not** merged.
+- **`down`** — onboarded but silent beyond `staleTTL`, or never reported. Shown
+  isolated, greyed with a red dashed border.
+
+The set of onboarded nodes comes from the controller's node inventory, **scoped
+to the home it controls** (a node belonging to another home is never surfaced).
+Live reports win: a node both onboarded and reporting fresh stays `alive` and
+appears once. This is a pure liveness signal (no ARP/neighbour probing yet — a
+possible follow-up); it does not depend on internet connectivity.
+
+The Topology view dims a `stale` node and crosses out a `down` node (`✕`
+suffix), labelling both with how long ago they were last seen (`Hallway · 2m
+ago`, `Garage ✕ 3d ago`), so configuration errors are visible at a glance.
+
+---
+
 ## Topology View
 
 ```mermaid

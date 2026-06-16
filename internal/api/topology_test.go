@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
 
+	"github.com/and-elf/omm/internal/models"
 	"github.com/and-elf/omm/internal/storage"
 	"github.com/and-elf/omm/internal/topology"
 )
@@ -62,6 +64,55 @@ func TestTopologyAggregatesReports(t *testing.T) {
 	}
 	if len(g.Links) != 1 || len(g.Clients) != 1 {
 		t.Fatalf("expected reported link+client, got links=%+v clients=%+v", g.Links, g.Clients)
+	}
+}
+
+// An onboarded node that has never reported its topology must still appear in
+// the merged graph as a down vertex, so an operator can see it failed to come up
+// instead of it silently missing from the map (#29). The inventory comes from
+// the controller's node store, scoped to the home it controls.
+func TestTopologySurfacesOnboardedSilentNode(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	store := storage.NewStore(db)
+
+	// A node onboarded into this controller's home but never reporting.
+	if err := store.CreateNode(context.Background(), models.Node{
+		ID: "n-silent", Serial: "SN9", CurrentHome: "home-1", LastSeen: 1,
+	}); err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+	// A node belonging to a different home must NOT be surfaced here.
+	if err := store.CreateNode(context.Background(), models.Node{
+		ID: "n-elsewhere", CurrentHome: "home-2", LastSeen: 1,
+	}); err != nil {
+		t.Fatalf("seed other node: %v", err)
+	}
+
+	collector := topology.NewCollector("ctrl", "Gateway", nil, nil, nil, nil)
+	router := NewRouter(store, noopProfileManager{},
+		WithSelfHome("home-1"), WithTopology(collector))
+
+	rw := doGet(t, router, "/topology")
+	var g topology.Graph
+	if err := json.Unmarshal(rw.Body.Bytes(), &g); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	var silent *topology.Node
+	for i := range g.Nodes {
+		if g.Nodes[i].ID == "n-elsewhere" {
+			t.Fatalf("a node from another home must not be surfaced: %+v", g.Nodes)
+		}
+		if g.Nodes[i].ID == "n-silent" {
+			silent = &g.Nodes[i]
+		}
+	}
+	if silent == nil {
+		t.Fatalf("onboarded-but-silent node must appear, got %+v", g.Nodes)
+	}
+	if silent.Status != topology.StatusDown {
+		t.Fatalf("silent node should be down, got %q", silent.Status)
 	}
 }
 
