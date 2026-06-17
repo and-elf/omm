@@ -85,6 +85,17 @@ describe('ApiClient', () => {
     await expect(client.deleteHome('h1')).rejects.toMatchObject({ status: 409 })
   })
 
+  it('deletes a node with a DELETE and tolerates a 204 (no body)', async () => {
+    const fetchFn = mockFetch({ status: 204 })
+    const client = new ApiClient('', fetchFn)
+
+    await expect(client.deleteNode('node 1')).resolves.toBeUndefined()
+    expect(fetchFn).toHaveBeenCalledWith(
+      '/nodes/node%201',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
   it('lists pending enrollments and unwraps the array', async () => {
     const enrollments = [{ id: 'e1', node_id: 'n1', serial: 'SN1', status: 'pending_approval' }]
     const client = new ApiClient('', mockFetch({ json: { enrollments } }))

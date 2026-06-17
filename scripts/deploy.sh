@@ -16,6 +16,12 @@
 #   ./scripts/deploy.sh controller --set adopt_policy=onlink
 #   ./scripts/deploy.sh node
 #   ./scripts/deploy.sh node --set auto_onboard_wired=1 --set backhaul_iface=eth0
+#   ./scripts/deploy.sh node --reset --controller controller --join https://10.0.0.1:8443
+#
+# --reset wipes a node's identity, so on its next join it enrolls under a fresh
+# node ID and its old record is left orphaned on the controller (a "down" ghost
+# in the topology). Pass --controller <host> with --reset to delete that prior
+# record from the controller before it is orphaned, keeping the topology clean.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -32,6 +38,7 @@ reset=0
 watch=0
 install_deps=0
 join_url=""
+controller=""
 sets=()
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -41,6 +48,7 @@ while [ $# -gt 0 ]; do
 	--reset) reset=1; shift ;;                       # wipe meshd state (DB) for a clean run
 	--watch) watch="$2"; shift 2 ;;                  # tail meshd log for N seconds at the end
 	--join) join_url="$2"; shift 2 ;;                # after deploy, enroll into this controller
+	--controller) controller="$2"; shift 2 ;;        # with --reset: delete this node's prior record from the controller (SSH host alias)
 	--install-dependencies) install_deps=1; shift ;; # swap in mesh-capable wpad + install kmod-batman-adv/batctl
 	*) echo "unknown argument: $1" >&2; exit 1 ;;
 	esac
@@ -48,9 +56,28 @@ done
 
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=8)
 ssh_() { ssh "${SSH_OPTS[@]}" "root@$host" "$@"; }
+ssh_ctrl() { ssh "${SSH_OPTS[@]}" "root@$controller" "$@"; }
 # -O forces the legacy SCP transfer protocol: OpenWrt's dropbear has no
 # sftp-server, so the default (SFTP) fails with "sftp-server: not found".
 scp_() { scp -O "${SSH_OPTS[@]}" "$1" "root@$host:$2"; }
+
+# Before --reset wipes the node's identity, capture the node ID it currently
+# enrolls under, so we can delete that record from the controller afterwards
+# instead of orphaning it as a "down" ghost. Read via the `meshd` ubus object
+# (the rpcd plugin proxies to the local API over busybox nc — OpenWrt has no
+# curl); meshd must be up to answer. A fresh/unjoined node yields no ID and we
+# skip cleanup.
+old_node_id=""
+if [ "$reset" = 1 ] && [ -n "$controller" ]; then
+	echo "==> $host: reading current node ID before reset"
+	old_node_id="$(ssh_ 'ubus call meshd setup 2>/dev/null' \
+		| sed -n 's/.*"node_id"[[:space:]]*:[[:space:]]*"\([0-9a-f]*\)".*/\1/p')"
+	if [ -n "$old_node_id" ]; then
+		echo "    will remove $old_node_id from $controller after reset"
+	else
+		echo "    no current node ID (fresh/unjoined node) — nothing to remove"
+	fi
+fi
 
 if [ "$swap" = 1 ]; then
 	echo "==> $host: detecting arch"
@@ -87,6 +114,19 @@ if [ "$swap" = 1 ]; then
 	# Stop before swapping: a running executable can't be overwritten in place
 	# (ETXTBSY), so mv the staged files over the stopped service.
 	ssh_ "/etc/init.d/meshd stop; ${reset_cmd}${cfg_cmd}mv /tmp/meshd.new /usr/bin/meshd; chmod 0755 /usr/bin/meshd; mv /tmp/meshd.init.new /etc/init.d/meshd; chmod 0755 /etc/init.d/meshd"
+
+	# Sync the freshly built PWA to the LuCI-served copy too. The LuCI topology
+	# view loads the PWA in an iframe from this path, shipped by the
+	# luci-app-meshd package; the binary swap above updates only meshd's own
+	# embedded copy on :8080, not this one — so without this the LuCI UI stays
+	# frozen at whatever the package last installed. Only when the luci-app is
+	# present (its view dir exists) and a frontend was built.
+	luci_view=/www/luci-static/resources/view/meshd
+	if [ -f web/dist/index.html ] && ssh_ "[ -d $luci_view ]"; then
+		echo "==> $host: syncing PWA to LuCI ($luci_view/pwa)"
+		ssh_ "rm -rf $luci_view/pwa && mkdir -p $luci_view/pwa"
+		tar -C web/dist --exclude=.gitkeep -cf - . | ssh_ "tar -C $luci_view/pwa -xf -"
+	fi
 elif [ "$reset" = 1 ]; then
 	echo "==> factory-wiping meshd state (no swap)"
 	ssh_ '/etc/init.d/meshd stop; rm -rf /etc/meshd/meshd.bolt /etc/meshd/identity'
@@ -172,6 +212,16 @@ fi
 if [ "$swap" = 1 ] || [ "$reset" = 1 ] || [ "$applied_sets" = 1 ] || [ "$install_deps" = 1 ]; then
 	echo "==> (re)starting meshd"
 	ssh_ '/etc/init.d/meshd restart; sleep 2; logread -e meshd | tail -4'
+fi
+
+# Remove the node's pre-reset record from the controller so it doesn't linger as
+# an orphaned "down" vertex. delete_node maps to DELETE /nodes/{id}, which also
+# drops the enrollment record. Best-effort: the call returns cleanly whether the
+# record existed or not, and an unreachable controller must not fail the deploy.
+if [ "$reset" = 1 ] && [ -n "$controller" ] && [ -n "$old_node_id" ]; then
+	echo "==> $controller: removing orphaned node record $old_node_id"
+	ssh_ctrl "ubus call meshd delete_node '{\"node_id\":\"$old_node_id\"}'" >/dev/null 2>&1 \
+		|| echo "    (controller unreachable — skipped)"
 fi
 
 if [ -n "$join_url" ]; then

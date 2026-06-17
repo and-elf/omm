@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/and-elf/omm/internal/topology"
 )
@@ -13,8 +14,17 @@ import (
 // nodes that are not currently reporting (surfaced as stale/down vertices from
 // the node inventory so they don't silently vanish — #29).
 func (h *apiHandler) getTopology(w http.ResponseWriter, r *http.Request) {
-	local := h.topology.Collect(r.Context())
-	writeJSON(w, http.StatusOK, h.topoAgg.Merge(local, h.nodeInventory(r.Context())...))
+	// Collect under a context detached from the request's cancellation. The LuCI
+	// ubus transport (rpcd → busybox nc) half-closes the socket once the request
+	// is written; Go's server reads that as the client going away and cancels
+	// r.Context(). Passing it to the collector would kill its batctl/iw
+	// subprocesses mid-run and return an empty graph, even though nc is still
+	// reading the response. We run to completion under our own timeout instead
+	// (internal/ubus.Call detaches downstream work for the same reason).
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+	defer cancel()
+	local := h.topology.Collect(ctx)
+	writeJSON(w, http.StatusOK, h.topoAgg.Merge(local, h.nodeInventory(ctx)...))
 }
 
 // nodeInventory lists the onboarded nodes belonging to this controller's home so
@@ -41,7 +51,14 @@ func (h *apiHandler) nodeInventory(ctx context.Context) []topology.InventoryNode
 		if n.ID == selfID || n.CurrentHome != h.selfHomeID {
 			continue
 		}
-		inv = append(inv, topology.InventoryNode{ID: n.ID, Label: n.ID, LastSeen: n.LastSeen})
+		// Label by the friendly serial so a silent node renders as a recognizable
+		// name rather than its raw 64-char node ID; fall back to the ID when a
+		// record predates serial capture.
+		label := n.Serial
+		if label == "" {
+			label = n.ID
+		}
+		inv = append(inv, topology.InventoryNode{ID: n.ID, Label: label, LastSeen: n.LastSeen})
 	}
 	return inv
 }
