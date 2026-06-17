@@ -15,75 +15,100 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const empty = ref(false)
 
-const style: cytoscape.StylesheetStyle[] = [
-  {
-    selector: 'node',
-    style: {
-      label: 'data(label)',
-      'background-color': '#38bdf8',
-      color: '#e2e8f0',
-      'font-size': 9,
-      'text-valign': 'bottom',
-      'text-margin-y': 4,
-      width: 26,
-      height: 26,
+// Resolve a theme CSS variable (set by theme.ts when embedded in LuCI),
+// falling back to the built-in dark value for the standalone PWA. Used for the
+// label text and halo so the graph stays legible on a light host theme; the
+// data-driven node/link colours below are deliberately theme-independent.
+function cssVar(name: string, fallback: string): string {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || fallback
+}
+
+function buildStyle(): cytoscape.StylesheetStyle[] {
+  const text = cssVar('--text', '#e2e8f0')
+  const halo = cssVar('--bg', '#0f172a')
+  return [
+    {
+      selector: 'node',
+      style: {
+        label: 'data(label)',
+        'background-color': '#38bdf8',
+        color: text,
+        'font-size': 9,
+        'text-valign': 'bottom',
+        'text-margin-y': 4,
+        width: 26,
+        height: 26,
+      },
     },
-  },
-  { selector: '.node--self', style: { 'background-color': '#f59e0b', width: 34, height: 34 } },
-  // Backhaul type: a solid border marks a wired node, a dashed border a
-  // wireless one, so an operator can see how each node reaches the mesh.
-  { selector: '.node--eth', style: { 'border-width': 3, 'border-color': '#22d3ee', 'border-style': 'solid' } },
-  { selector: '.node--wifi', style: { 'border-width': 3, 'border-color': '#a78bfa', 'border-style': 'dashed' } },
-  // A node running as multi-AP (802.11s degraded/unavailable) is tinted amber so
-  // the fallback stands out per node.
-  { selector: '.node--multiap', style: { 'background-color': '#f59e0b' } },
-  // Liveness: a node the controller has stopped hearing from is onboarded but not
-  // alive (#29). Stale (recently overdue) is dimmed grey; down (long silent) is
-  // greyed out with a red dashed border, its label already suffixed with ✕.
-  { selector: '.node--stale', style: { 'background-color': '#64748b', opacity: 0.55, 'text-opacity': 0.7 } },
-  {
-    selector: '.node--down',
-    style: {
-      'background-color': '#475569',
-      'border-width': 3,
-      'border-color': '#ef4444',
-      'border-style': 'dashed',
-      opacity: 0.5,
-      color: '#fca5a5',
+    { selector: '.node--self', style: { 'background-color': '#f59e0b', width: 34, height: 34 } },
+    // Backhaul type: a solid border marks a wired node, a dashed border a
+    // wireless one, so an operator can see how each node reaches the mesh.
+    {
+      selector: '.node--eth',
+      style: { 'border-width': 3, 'border-color': '#22d3ee', 'border-style': 'solid' },
     },
-  },
-  {
-    selector: '.client',
-    style: { 'background-color': '#64748b', shape: 'round-rectangle', width: 18, height: 18 },
-  },
-  {
-    selector: 'edge',
-    style: {
-      label: 'data(label)',
-      'font-size': 10,
-      color: '#f1f5f9',
-      // A dark rounded halo behind the label keeps it legible where it sits on
-      // top of the line and crosses nodes/other edges.
-      'text-background-color': '#0f172a',
-      'text-background-opacity': 0.85,
-      'text-background-padding': '2px',
-      'text-background-shape': 'roundrectangle',
-      'curve-style': 'bezier',
-      'text-rotation': 'autorotate',
-      width: 2,
+    {
+      selector: '.node--wifi',
+      style: { 'border-width': 3, 'border-color': '#a78bfa', 'border-style': 'dashed' },
     },
-  },
-  // Quality colour by RSSI/TQ tier (shared by mesh links and client assocs).
-  { selector: '.link--excellent, .assoc--excellent', style: { 'line-color': '#4ade80' } },
-  { selector: '.link--good, .assoc--good', style: { 'line-color': '#86efac' } },
-  { selector: '.link--fair, .assoc--fair', style: { 'line-color': '#facc15' } },
-  { selector: '.link--weak, .assoc--weak', style: { 'line-color': '#f87171' } },
-  // Backhaul medium: wired links draw solid (cyan, matching the wired node
-  // border), wireless links draw dashed. Client associations stay dashed.
-  { selector: '.link--wired', style: { 'line-style': 'solid', 'line-color': '#22d3ee', width: 3 } },
-  { selector: '.link--wireless', style: { 'line-style': 'dashed' } },
-  { selector: '.assoc', style: { 'line-style': 'dashed' } },
-]
+    // A node running as multi-AP (802.11s degraded/unavailable) is tinted amber so
+    // the fallback stands out per node.
+    { selector: '.node--multiap', style: { 'background-color': '#f59e0b' } },
+    // Liveness: a node the controller has stopped hearing from is onboarded but not
+    // alive (#29). Stale (recently overdue) is dimmed grey; down (long silent) is
+    // greyed out with a red dashed border, its label already suffixed with ✕.
+    {
+      selector: '.node--stale',
+      style: { 'background-color': '#64748b', opacity: 0.55, 'text-opacity': 0.7 },
+    },
+    {
+      selector: '.node--down',
+      style: {
+        'background-color': '#475569',
+        'border-width': 3,
+        'border-color': '#ef4444',
+        'border-style': 'dashed',
+        opacity: 0.5,
+        color: '#fca5a5',
+      },
+    },
+    {
+      selector: '.client',
+      style: { 'background-color': '#64748b', shape: 'round-rectangle', width: 18, height: 18 },
+    },
+    {
+      selector: 'edge',
+      style: {
+        label: 'data(label)',
+        'font-size': 10,
+        color: text,
+        // A rounded halo (host background colour) behind the label keeps it
+        // legible where it sits on top of the line and crosses nodes/other edges.
+        'text-background-color': halo,
+        'text-background-opacity': 0.85,
+        'text-background-padding': '2px',
+        'text-background-shape': 'roundrectangle',
+        'curve-style': 'bezier',
+        'text-rotation': 'autorotate',
+        width: 2,
+      },
+    },
+    // Quality colour by RSSI/TQ tier (shared by mesh links and client assocs).
+    { selector: '.link--excellent, .assoc--excellent', style: { 'line-color': '#4ade80' } },
+    { selector: '.link--good, .assoc--good', style: { 'line-color': '#86efac' } },
+    { selector: '.link--fair, .assoc--fair', style: { 'line-color': '#facc15' } },
+    { selector: '.link--weak, .assoc--weak', style: { 'line-color': '#f87171' } },
+    // Backhaul medium: wired links draw solid (cyan, matching the wired node
+    // border), wireless links draw dashed. Client associations stay dashed.
+    {
+      selector: '.link--wired',
+      style: { 'line-style': 'solid', 'line-color': '#22d3ee', width: 3 },
+    },
+    { selector: '.link--wireless', style: { 'line-style': 'dashed' } },
+    { selector: '.assoc', style: { 'line-style': 'dashed' } },
+  ]
+}
 
 async function load() {
   loading.value = true
@@ -105,7 +130,7 @@ async function load() {
 
 onMounted(() => {
   if (container.value) {
-    cy.value = cytoscape({ container: container.value, style, elements: [] })
+    cy.value = cytoscape({ container: container.value, style: buildStyle(), elements: [] })
   }
   load()
 })

@@ -39,9 +39,11 @@ onMounted(async () => {
     <header v-if="showChrome" class="app__bar">
       <span class="app__brand">OMM</span>
       <nav class="app__nav">
-        <RouterLink v-for="link in links" :key="link.to" :to="link.to" class="app__link">
-          {{ link.label }}
-        </RouterLink>
+        <ul class="app__menu">
+          <li v-for="link in links" :key="link.to" class="app__item">
+            <RouterLink :to="link.to" class="app__link">{{ link.label }}</RouterLink>
+          </li>
+        </ul>
       </nav>
     </header>
     <main :class="showChrome ? 'app__main' : ''">
