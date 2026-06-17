@@ -114,6 +114,19 @@ if [ "$swap" = 1 ]; then
 	# Stop before swapping: a running executable can't be overwritten in place
 	# (ETXTBSY), so mv the staged files over the stopped service.
 	ssh_ "/etc/init.d/meshd stop; ${reset_cmd}${cfg_cmd}mv /tmp/meshd.new /usr/bin/meshd; chmod 0755 /usr/bin/meshd; mv /tmp/meshd.init.new /etc/init.d/meshd; chmod 0755 /etc/init.d/meshd"
+
+	# Sync the freshly built PWA to the LuCI-served copy too. The LuCI topology
+	# view loads the PWA in an iframe from this path, shipped by the
+	# luci-app-meshd package; the binary swap above updates only meshd's own
+	# embedded copy on :8080, not this one — so without this the LuCI UI stays
+	# frozen at whatever the package last installed. Only when the luci-app is
+	# present (its view dir exists) and a frontend was built.
+	luci_view=/www/luci-static/resources/view/meshd
+	if [ -f web/dist/index.html ] && ssh_ "[ -d $luci_view ]"; then
+		echo "==> $host: syncing PWA to LuCI ($luci_view/pwa)"
+		ssh_ "rm -rf $luci_view/pwa && mkdir -p $luci_view/pwa"
+		tar -C web/dist --exclude=.gitkeep -cf - . | ssh_ "tar -C $luci_view/pwa -xf -"
+	fi
 elif [ "$reset" = 1 ]; then
 	echo "==> factory-wiping meshd state (no swap)"
 	ssh_ '/etc/init.d/meshd stop; rm -rf /etc/meshd/meshd.bolt /etc/meshd/identity'
