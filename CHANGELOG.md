@@ -17,14 +17,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wizard. Network posture management (`manage_network`) stays opt-in.
 
 ### Fixed
-- **Topology view now draws lines between the real nodes (#27/#28).** batman-adv
-  lists neighbours by originator MAC while each node self-reports under a node ID,
-  so links pointed at anonymous MAC blobs and the real nodes never connected. Each
-  node now reports its batman address(es) (`addrs`, read from
-  `/sys/class/net/<bat-iface>/address`) and the aggregator rewrites MAC-keyed link
-  endpoints to the owning node ID, dropping the redundant MAC nodes.
+- **Topology view now draws lines between the real nodes (#27/#28/#33).**
+  batman-adv lists neighbours by originator MAC while each node self-reports under
+  a node ID, so links pointed at anonymous MAC blobs and the real nodes never
+  connected. Each node now reports its batman address(es) (`addrs`) and the
+  aggregator rewrites MAC-keyed link endpoints to the owning node ID, dropping the
+  redundant MAC nodes. Because batman-adv keys originators by the hard interface
+  the OGMs arrive on, a wired-backhaul node appears under several MACs (its mesh
+  MAC plus each ethernet port's unique hardif MAC); reporting only the `bat0`
+  address left those wired-port originators unmapped, so each ethernet port
+  surfaced as a separate unconnected node. `BatctlSelfAddrs` now enumerates every
+  enslaved hard interface via `batctl if` and reports each MAC (plus `bat0`),
+  degrading to the `bat0` address alone when `batctl` is unavailable.
+- **Wireless clients never reached the controller's topology (#33).** Client
+  collection only read the explicitly-configured AP-interface list, which was
+  never wired through the init script — so on deployed devices it was empty and
+  every node aggregated zero clients. Nodes now auto-discover AP-mode vifs from
+  `network.wireless status` (querying each hostapd object, skipping the mesh vif)
+  when none are configured; an explicit list still wins, and `ap_interfaces` is
+  now wired through the init for that override.
+- **Empty topology graph over LuCI (#33).** The LuCI ubus transport
+  (rpcd → busybox `nc`) half-closes the socket once the request is written, which
+  Go reads as the client leaving and cancels the request context — killing the
+  `batctl`/`iw` subprocesses mid-collect and returning an empty graph. Topology
+  collection now runs to completion under its own timeout, detached from the
+  request's cancellation. Onboarded-but-silent inventory nodes are also labelled
+  by their serial instead of the raw 64-char node ID (falling back to the ID for
+  records that predate serial capture).
+- **Topology edge labels were illegible (#33).** The link speed/TQ/RSSI labels
+  were small grey text with no background and washed out over the line and nodes;
+  they now get a dark rounded halo, brighter text, and a slightly larger font.
+- **Stale PWA baked into builds (#33).** `vite` runs with `emptyOutDir:false` so a
+  no-frontend build still has a `dist` to embed, but hashed bundles accumulated
+  across builds and the binary (`embed all:dist`) could bake in an outdated
+  `index.html`/chunk and serve a stale PWA against a current backend. The build
+  now clears the generated output before each frontend build, keeping the tracked
+  `.gitkeep` placeholder.
 
 ### Added
+- **PWA adopts the LuCI host theme when embedded.** Served inside LuCI the PWA
+  runs in a same-origin iframe, so it now reads the host page's resolved colours,
+  font and stylesheets and blends in (a `.theme-host` palette derived with
+  `color-mix()`, host stylesheets imported ahead of our CSS) instead of imposing
+  its own dark palette; the topology graph resolves its label/halo colours from
+  CSS variables so it stays legible on a light host theme. Standalone (`meshd` on
+  `:8080`) the built-in dark theme is unchanged. New `web/src/theme.ts`.
+- **Remove nodes from the Nodes view (#33).** The Nodes view gains bulk node
+  removal — per-row and select-all checkboxes and a "Delete selected" button that
+  confirms once, deletes each node and prunes the selection to still-existing
+  records on refresh — giving operators a way to clear stale/orphaned node records
+  (e.g. ones left behind when a node re-enrolled under a fresh identity). Wires
+  `DELETE /nodes/{id}` into the API client and the LuCI ubus transport
+  (`delete_node`, already ACL-authorized).
+- **Deploy prunes orphaned records and syncs the LuCI PWA (#33).** `--reset`
+  wipes a node's identity, so on its next join it enrolls under a fresh node ID
+  and its old record lingers as a "down" ghost; `scripts/deploy.sh --controller
+  <host>` now reads the node's current ID (`ubus call meshd setup`) before the
+  wipe and removes that record afterwards (`ubus call meshd delete_node`),
+  best-effort so an unreachable controller never fails the deploy. Deploy also
+  pushes the freshly built `web/dist` to the LuCI-served PWA copy
+  (`/www/luci-static/resources/view/meshd/pwa`) when the luci-app is installed, so
+  the embedded and standalone frontends update together.
 - **Node liveness in the topology graph (#29).** An onboarded node that stops
   reporting — powered off, meshd down, or mesh failed to form — no longer
   silently vanishes from the map. The aggregator keeps onboarded nodes (from the
