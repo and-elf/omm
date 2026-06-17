@@ -10,6 +10,13 @@ mkdir -p bin
 if [ "${SKIP_FRONTEND:-0}" != "1" ]; then
   if command -v npm >/dev/null 2>&1; then
     echo "Building PWA frontend"
+    # Clear previously-built assets first. vite is configured emptyOutDir:false
+    # (so a no-frontend build still has a dist to embed), which otherwise lets
+    # stale hashed bundles accumulate — and since the build embeds `all:dist`,
+    # an outdated index.html/chunk can get baked into the binary, serving an old
+    # PWA against a current backend. Keep the tracked .gitkeep the no-frontend
+    # path relies on.
+    find web/dist -mindepth 1 ! -name .gitkeep -delete
     (cd web && npm ci && npm run build)
   else
     echo "WARNING: npm not found; embedding existing web/dist (run 'npm run build' in web/ for a fresh frontend)" >&2
