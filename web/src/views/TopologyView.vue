@@ -60,8 +60,14 @@ const style: cytoscape.StylesheetStyle[] = [
     selector: 'edge',
     style: {
       label: 'data(label)',
-      'font-size': 8,
-      color: '#94a3b8',
+      'font-size': 10,
+      color: '#f1f5f9',
+      // A dark rounded halo behind the label keeps it legible where it sits on
+      // top of the line and crosses nodes/other edges.
+      'text-background-color': '#0f172a',
+      'text-background-opacity': 0.85,
+      'text-background-padding': '2px',
+      'text-background-shape': 'roundrectangle',
       'curve-style': 'bezier',
       'text-rotation': 'autorotate',
       width: 2,
