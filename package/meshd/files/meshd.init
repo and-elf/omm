@@ -10,7 +10,7 @@ start_service() {
 
 	local role http_addr mgmt_addr mesh_addr database_path udp_listen home_id home_name controller_id
 	local adopt_policy controller_url identity_dir serial backhaul_iface led_enabled led_name auto_onboard_wired
-	local manage_network uplink_port lan_device onboard_grace mesh_ssid mesh_key mesh_radio
+	local manage_network uplink_port lan_device onboard_grace mesh_ssid mesh_key mesh_radio ap_interfaces
 
 	config_get role main role controller
 	# When http_addr is set, meshd serves both planes on it (combined mode).
@@ -32,6 +32,9 @@ start_service() {
 	config_get identity_dir main identity_dir /etc/meshd/identity
 	config_get serial main serial ""
 	config_get backhaul_iface main backhaul_iface br-lan
+	# Optional override of the hostapd interfaces to read clients from. Empty (the
+	# default) lets meshd auto-discover AP vifs from `network.wireless status`.
+	config_get ap_interfaces main ap_interfaces ""
 	config_get led_enabled main led_enabled 1
 	config_get led_name main led_name green:status
 	config_get auto_onboard_wired main auto_onboard_wired 1
@@ -63,6 +66,7 @@ start_service() {
 		MESHD_IDENTITY_DIR="$identity_dir" \
 		MESHD_SERIAL="$serial" \
 		MESHD_BACKHAUL_IFACE="$backhaul_iface" \
+		MESHD_AP_IFACES="$ap_interfaces" \
 		MESHD_LED="$led_enabled" \
 		MESHD_LED_NAME="$led_name" \
 		MESHD_AUTO_ONBOARD_WIRED="$auto_onboard_wired" \

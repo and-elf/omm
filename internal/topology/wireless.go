@@ -2,17 +2,55 @@ package topology
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/and-elf/omm/internal/ubus"
 )
 
 // UbusClients reads associated stations (and their RSSI) from hostapd over
-// ubus: `hostapd.<iface> get_clients`. Interfaces are configured explicitly
-// (auto-discovery via `ubus list` is a future improvement).
+// ubus: `hostapd.<iface> get_clients`. Interfaces may be set explicitly; when
+// empty they are auto-discovered from `network.wireless status` (every AP-mode
+// wifi-iface), so a node's clients always propagate without per-device config —
+// the AP vif name is assigned by netifd and varies, so relying on a static list
+// silently drops clients whenever it changes.
 type UbusClients struct {
 	Ubus       ubus.Client
 	Interfaces []string
+}
+
+// wirelessStatus mirrors the fields of `network.wireless status` that AP
+// discovery needs (each radio's interfaces, with their runtime ifname and mode).
+type wirelessStatus struct {
+	Interfaces []struct {
+		Ifname string `json:"ifname"`
+		Config struct {
+			Mode string `json:"mode"`
+		} `json:"config"`
+	} `json:"interfaces"`
+}
+
+// apInterfaces returns the hostapd interfaces to read clients from: the explicit
+// list when configured, else the AP-mode vifs discovered from the live wireless
+// status. A discovery failure yields none (clients are best-effort).
+func (u UbusClients) apInterfaces(ctx context.Context) []string {
+	if len(u.Interfaces) > 0 {
+		return u.Interfaces
+	}
+	var status map[string]wirelessStatus
+	if err := u.Ubus.Call(ctx, "network.wireless", "status", nil, &status); err != nil {
+		return nil
+	}
+	var ifaces []string
+	for _, dev := range status {
+		for _, iface := range dev.Interfaces {
+			if iface.Config.Mode == "ap" && iface.Ifname != "" {
+				ifaces = append(ifaces, iface.Ifname)
+			}
+		}
+	}
+	sort.Strings(ifaces) // map iteration is random; keep output deterministic
+	return ifaces
 }
 
 // getClientsResponse mirrors the hostapd get_clients ubus reply.
@@ -31,7 +69,7 @@ type getClientsResponse struct {
 
 func (u UbusClients) Clients(ctx context.Context) ([]Client, error) {
 	var out []Client
-	for _, iface := range u.Interfaces {
+	for _, iface := range u.apInterfaces(ctx) {
 		var resp getClientsResponse
 		if err := u.Ubus.Call(ctx, "hostapd."+iface, "get_clients", nil, &resp); err != nil {
 			continue // an interface may be down; skip it
