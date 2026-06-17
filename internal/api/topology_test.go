@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/and-elf/omm/internal/models"
@@ -113,6 +114,50 @@ func TestTopologySurfacesOnboardedSilentNode(t *testing.T) {
 	}
 	if silent.Status != topology.StatusDown {
 		t.Fatalf("silent node should be down, got %q", silent.Status)
+	}
+	// The vertex must be labelled with the node's friendly serial, not its raw
+	// 64-char node ID — otherwise silent nodes render as anonymous hex blobs.
+	if silent.Label != "SN9" {
+		t.Fatalf("silent node should be labelled by serial, got %q", silent.Label)
+	}
+}
+
+// ctxSensitiveMesh mimics the real batctl source: its work fails if the context
+// is already cancelled (CommandContext kills the subprocess). It is how we assert
+// getTopology does not pass the request's cancellation to the collector.
+type ctxSensitiveMesh struct{}
+
+func (ctxSensitiveMesh) Neighbors(ctx context.Context) ([]topology.Neighbor, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return []topology.Neighbor{{ID: "n9", TQ: 200}}, nil
+}
+
+// The LuCI ubus transport cancels the request context mid-handler (rpcd's nc
+// half-closes the socket). getTopology must still collect a full graph — it runs
+// the collector under a context detached from that cancellation.
+func TestTopologyCollectsDespiteCancelledRequestContext(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	collector := topology.NewCollector("ctrl", "Gateway", ctxSensitiveMesh{}, nil, nil, nil)
+	router := NewRouter(storage.NewStore(db), noopProfileManager{}, WithTopology(collector))
+
+	req := httptest.NewRequest(http.MethodGet, "/topology", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel() // client "gone" before the handler runs the collector
+	req = req.WithContext(ctx)
+	rw := httptest.NewRecorder()
+	router.ServeHTTP(rw, req)
+
+	var g topology.Graph
+	if err := json.Unmarshal(rw.Body.Bytes(), &g); err != nil {
+		t.Fatalf("decode graph: %v", err)
+	}
+	// The neighbour (and its link) survive only if the collector ran with a
+	// live context despite the cancelled request.
+	if len(g.Links) != 1 || g.Links[0].Target != "n9" {
+		t.Fatalf("expected the collected neighbour link, got nodes=%+v links=%+v", g.Nodes, g.Links)
 	}
 }
 
