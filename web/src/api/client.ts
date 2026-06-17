@@ -118,6 +118,13 @@ export class ApiClient {
     return this.request<Node>(`/nodes/${encodeURIComponent(nodeId)}`)
   }
 
+  // deleteNode decommissions a node, removing its record and enrollment. Used to
+  // clear out stale/orphaned entries (e.g. a node that re-enrolled under a fresh
+  // identity after a factory reset, leaving its old record behind).
+  deleteNode(nodeId: string): Promise<void> {
+    return this.request<void>(`/nodes/${encodeURIComponent(nodeId)}`, { method: 'DELETE' })
+  }
+
   async getProfile(homeId: string): Promise<Profile> {
     const { profile } = await this.request<{ profile: Profile }>(
       `/homes/${encodeURIComponent(homeId)}/profile`,

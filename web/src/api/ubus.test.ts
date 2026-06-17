@@ -68,6 +68,14 @@ describe('createUbusFetch', () => {
     expect(JSON.parse(raw.mock.calls[0][1].body).params).toEqual(['tok', 'meshd', 'delete_home', { home_id: 'h1' }])
   })
 
+  it('maps a DELETE node to the delete_node ubus call', async () => {
+    const raw = vi.fn().mockResolvedValue(ubusEnvelope({}))
+    const client = new ApiClient('', createUbusFetch({ token: 'tok', fetchFn: raw as unknown as typeof fetch }))
+
+    await client.deleteNode('n1')
+    expect(JSON.parse(raw.mock.calls[0][1].body).params).toEqual(['tok', 'meshd', 'delete_node', { node_id: 'n1' }])
+  })
+
   it('surfaces a meshd error payload as a failed response', async () => {
     const raw = vi.fn().mockResolvedValue(ubusEnvelope({ error: 'not found' }))
     const client = new ApiClient('', createUbusFetch({ token: 'tok', fetchFn: raw as unknown as typeof fetch }))
