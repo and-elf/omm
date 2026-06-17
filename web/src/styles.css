@@ -7,7 +7,27 @@
   --accent: #38bdf8;
   --border: #334155;
   --error: #f87171;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+/*
+ * Host (LuCI) theme. theme.ts sets --bg/--text/--accent (and the root font)
+ * from the embedding LuCI page; the rest of the palette is derived from those
+ * bases here so it stays coherent whether the host is light or dark. Mixing
+ * toward --text (away from --bg) darkens on a light host and lightens on a dark
+ * one, which is exactly what each surface needs.
+ */
+:root.theme-host {
+  --surface: color-mix(in srgb, var(--bg) 94%, var(--text));
+  --surface-2: color-mix(in srgb, var(--bg) 88%, var(--text));
+  --border: color-mix(in srgb, var(--bg) 80%, var(--text));
+  --muted: color-mix(in srgb, var(--text) 60%, var(--bg));
+  --error: color-mix(in srgb, #ef4444 70%, var(--text));
 }
 
 * {
@@ -38,10 +58,17 @@ body {
   color: var(--accent);
 }
 
-.app__nav {
+.app__menu {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app__item {
+  display: flex;
 }
 
 .app__link {
@@ -72,6 +99,10 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 1rem;
+  /* Declared so an imported LuCI `header {}` rule can't bleed a bar background
+     onto our section headers; LuCI styles the inner <h2> directly. */
+  background: transparent;
+  padding: 0;
 }
 
 .view__actions {
