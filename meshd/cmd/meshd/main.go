@@ -243,10 +243,12 @@ func main() {
 		topology.SysfsBackhaul{Iface: cfg.BackhaulIface},
 		storeMeshMode{store: store},
 		// Classify each mesh link's medium (solid wired / dashed wireless) and
-		// measure its speed or RSSI, and report this node's bat0 address so the
-		// controller can reconcile MAC-keyed links back to node IDs (#27/#28).
+		// measure its speed or RSSI, and report all this node's batman hardif MACs
+		// (bat0 + each enslaved port) so the controller can reconcile MAC-keyed
+		// links back to node IDs — including wired-port originators, whose unique
+		// hardif MACs would otherwise appear as separate nodes (#27/#28).
 		topology.WithLinkMetrics(topology.SysfsIwLinkMetrics{}),
-		topology.WithSelfAddrs(topology.SysfsSelfAddrs{Iface: cfg.BatmanIface}),
+		topology.WithSelfAddrs(topology.BatctlSelfAddrs{Iface: cfg.BatmanIface}),
 	)
 
 	// Passively cache controller announcements so /scan answers instantly.

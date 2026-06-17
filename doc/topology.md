@@ -57,22 +57,31 @@ a dashed border.
 
 ## Link Identity (MAC ↔ node reconciliation)
 
-batman-adv lists neighbours by their **originator MAC** (a bat0 address), but
-every node self-reports its graph under its **node ID**. Left unreconciled, a
-controller's link points at an anonymous MAC blob and the real nodes never
-connect — there are no lines between them.
+batman-adv lists neighbours by their **originator MAC** — the MAC of the *hard
+interface* the OGMs arrive on — but every node self-reports its graph under its
+**node ID**. Left unreconciled, a controller's link points at an anonymous MAC
+blob and the real nodes never connect — there are no lines between them.
 
-To fix this each node reports the batman addresses it is known by, on its `self`
-vertex:
+A node has **more than one** such MAC. Its `bat0` MAC usually equals the wireless
+mesh hardif MAC, but each wired backhaul port is a separate batman hardif with
+its own unique, locally-administered MAC (assigned by `batman.uniqueHardifMAC` so
+shared-MAC DSA ports don't collide). So a node with a wired link appears in
+`batctl o` under several originator MACs. Reporting only the `bat0` MAC left the
+wired-port originators unmapped, so they survived as phantom "separate node"
+vertices — one per ethernet port.
+
+To fix this each node reports **all** the batman addresses it is known by, on its
+`self` vertex:
 
 ```json
-{ "id": "n1", "label": "Kitchen", "role": "self", "addrs": ["aa:bb:cc:dd:ee:01"] }
+{ "id": "n1", "label": "Kitchen", "role": "self", "addrs": ["aa:bb:cc:dd:ee:01", "02:bb:cc:dd:ee:99"] }
 ```
 
 The aggregator builds a MAC→node-ID index from every report's `addrs`, rewrites
 each link's MAC endpoints to the owning node ID, and drops the now-redundant MAC
 nodes. A MAC no node has claimed is left as-is (an as-yet-unknown node). The
-node address is read from `/sys/class/net/<bat-iface>/address`.
+addresses are enumerated from `batctl if` (each enslaved hard interface) plus
+`bat0` itself, reading each device's MAC from `/sys/class/net/<dev>/address`.
 
 ---
 
