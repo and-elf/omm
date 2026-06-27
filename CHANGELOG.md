@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Dual-band / multi-band client AP (#36).** A claimed home previously
+  broadcast its client AP on a single radio (typically 5 GHz), so 2.4 GHz-only
+  devices had no AP to join. `ApplyProfile` now authors the client AP across
+  multiple bands: the primary `omm_ap` stays on the `radio`/`band`-resolved
+  radio, and each band in the new `ap_bands` profile field (`"2g"`/`"5g"`/`"6g"`)
+  resolves to that node's matching radio, authored as `omm_ap_<band>` (e.g.
+  `omm_ap_2g`, coexisting with `omm_mesh` on the same 2.4 GHz radio/channel).
+  Empty `ap_bands` defaults to also broadcasting on 2.4 GHz, so every home gets a
+  dual-band AP with no configuration; set a single band (e.g. `["5g"]`) to opt
+  out. Bands absent on a node are skipped (not fatal), and narrowing `ap_bands`
+  prunes the now-stale `omm_ap_<band>` sections on re-apply.
+
 ### Changed
 - **Zero-touch defaults.** A fresh kit now self-forms with no configuration: the
   controller's `adopt_policy` defaults to `onlink` (auto-adopt only nodes

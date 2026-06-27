@@ -33,9 +33,17 @@ type Profile struct {
 	// radio names are device-specific. Radio is an advanced override naming the
 	// wifi-device directly (e.g. "radio0"). Precedence: Radio, then Band, then
 	// the daemon default.
-	Band  string   `json:"band"`
-	Radio string   `json:"radio"`
-	VLANs []string `json:"vlans"`
+	Band  string `json:"band"`
+	Radio string `json:"radio"`
+	// APBands lists the bands the client AP is broadcast on ("2g"/"5g"/"6g"),
+	// each resolved to that node's matching radio so phones on either band join
+	// one SSID. The primary AP keeps section omm_ap (on the Band/Radio-resolved
+	// radio); additional bands are authored as omm_ap_<band>, deduped by radio.
+	// Empty defaults to also broadcasting on 2.4 GHz, so every home gets a
+	// dual-band AP without extra config; set a single band (e.g. ["5g"]) to
+	// broadcast on that band only. A band with no radio on a node is skipped.
+	APBands []string `json:"ap_bands"`
+	VLANs   []string `json:"vlans"`
 	// MeshChannel/MeshHTMode pin the 802.11s backhaul's channel and width
 	// home-wide, so every node's mesh lands on the same channel and lines up to
 	// peer. Empty leaves the mesh radio's existing channel/width untouched. The

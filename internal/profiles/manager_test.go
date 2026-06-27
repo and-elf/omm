@@ -359,6 +359,108 @@ func TestApplyProfileExplicitAPOverridesMeshFallback(t *testing.T) {
 	}
 }
 
+// By default (no APBands set) a home gets a dual-band client AP: the primary
+// omm_ap on the AP radio plus omm_ap_2g on the 2.4 GHz radio, so 2.4 GHz-only
+// clients can join. Both share the SSID/key and bridge to lan, and both radios
+// are enabled.
+func TestApplyProfileDefaultAuthorsTwoFourGHzAP(t *testing.T) {
+	fake := &fakeUCI{wireless: lyraRadios()}
+	m := NewManager(nil, fake, Config{Radio: "radio0"}) // AP on 5 GHz radio0
+
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm", MeshKey: "secret123"}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+
+	if got := fake.sections[apSection]["device"]; got != "radio0" {
+		t.Fatalf("primary AP device = %q, want radio0", got)
+	}
+	ap2g := fake.sections[apSection+"_2g"]
+	if ap2g == nil {
+		t.Fatalf("2.4 GHz AP %q not authored; sections=%v", apSection+"_2g", fake.sections)
+	}
+	if ap2g["device"] != "radio1" || ap2g["mode"] != "ap" || ap2g["ssid"] != "omm" ||
+		ap2g["encryption"] != "psk2" || ap2g["key"] != "secret123" || ap2g["network"] != "lan" {
+		t.Fatalf("2.4 GHz AP section wrong: %v", ap2g)
+	}
+	if !contains(fake.sets, "wireless.radio1.disabled=0") {
+		t.Fatalf("2.4 GHz radio not enabled; sets=%v", fake.sets)
+	}
+}
+
+// Explicit APBands author one client AP per band, deduped by radio: a band that
+// resolves to the primary AP radio adds no extra section.
+func TestApplyProfileAPBandsExplicit(t *testing.T) {
+	fake := &fakeUCI{wireless: lyraRadios()}
+	m := NewManager(nil, fake, Config{Radio: "radio0"})
+
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm", APBands: []string{"2g", "5g"}}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+
+	if got := fake.sections[apSection]["device"]; got != "radio0" {
+		t.Fatalf("primary AP device = %q, want radio0", got)
+	}
+	if got := fake.sections[apSection+"_2g"]["device"]; got != "radio1" {
+		t.Fatalf("2.4 GHz AP device = %q, want radio1", got)
+	}
+	// "5g" resolves to the primary radio0, so no omm_ap_5g is authored.
+	if _, ok := fake.sections[apSection+"_5g"]; ok {
+		t.Fatalf("omm_ap_5g should be deduped against the primary AP radio")
+	}
+}
+
+// A single-band APBands opts out of the default 2.4 GHz AP.
+func TestApplyProfileAPBandsSingleBandOptsOut(t *testing.T) {
+	fake := &fakeUCI{wireless: lyraRadios()}
+	m := NewManager(nil, fake, Config{Radio: "radio0"})
+
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm", APBands: []string{"5g"}}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+	if _, ok := fake.sections[apSection+"_2g"]; ok {
+		t.Fatalf("APBands=[5g] must not author a 2.4 GHz AP; sections=%v", fake.sections)
+	}
+}
+
+// A requested band with no radio on this node is skipped, not fatal — a home
+// profile applies across heterogeneous boards.
+func TestApplyProfileAPBandsMissingBandSkipped(t *testing.T) {
+	fake := &fakeUCI{wireless: lyraRadios()} // no 6 GHz radio
+	m := NewManager(nil, fake, Config{Radio: "radio0"})
+
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm", APBands: []string{"6g"}}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("apply must succeed when a band is absent: %v", err)
+	}
+	if _, ok := fake.sections[apSection+"_6g"]; ok {
+		t.Fatalf("no 6 GHz radio, so no omm_ap_6g should be authored")
+	}
+	if fake.sections[apSection] == nil {
+		t.Fatalf("primary AP must still be authored")
+	}
+}
+
+// Re-applying with a narrower APBands prunes the now-stale omm_ap_* section.
+func TestApplyProfilePrunesStaleSecondaryAP(t *testing.T) {
+	wireless := lyraRadios()
+	wireless["omm_ap_2g"] = map[string]string{".type": "wifi-iface", ".name": "omm_ap_2g", "device": "radio1"}
+	fake := &fakeUCI{wireless: wireless}
+	m := NewManager(nil, fake, Config{Radio: "radio0"})
+
+	// APBands=[5g] resolves only to the primary radio, so the stale 2.4 GHz AP
+	// must be deleted.
+	prof := models.Profile{HomeID: "h1", MeshSSID: "omm", APBands: []string{"5g"}}
+	if err := m.ApplyProfile(context.Background(), prof); err != nil {
+		t.Fatalf("apply profile: %v", err)
+	}
+	if !contains(fake.deleted, "omm_ap_2g") {
+		t.Fatalf("stale omm_ap_2g not pruned; deleted=%v", fake.deleted)
+	}
+}
+
 // newStore builds a real in-memory store so backhaul-state persistence is
 // exercised end-to-end (there is no fake Store in the codebase).
 func newStore(t *testing.T) storage.Store {
