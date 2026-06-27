@@ -54,6 +54,24 @@ never touched, and the radio is enabled only when at least one SSID is set. The
 sections are authored with create-or-update semantics, so a stock device with
 no prior OMM wireless comes up correctly.
 
+### Dual-band / multi-band client AP
+
+By default the client AP is broadcast on **both** the AP radio and the 2.4 GHz
+band, so 2.4 GHz-only devices can join the Home. The `ap_bands` profile field
+(values `"2g"` / `"5g"` / `"6g"`) controls this:
+
+- The primary AP stays `omm_ap` on the `radio`/`band`-resolved radio. Each band
+  in `ap_bands` resolves to that node's lowest-numbered matching radio and, when
+  it is a different radio, is authored as **`omm_ap_<band>`** (e.g. `omm_ap_2g`)
+  sharing the same SSID/key and bridged to `lan`. A 2.4 GHz client AP coexists
+  with `omm_mesh` on the same radio and channel.
+- **Empty `ap_bands` defaults to also broadcasting on 2.4 GHz** — every home gets
+  a dual-band AP with no configuration. Set a single band (e.g. `["5g"]`) to
+  broadcast on that band only.
+- A band with no radio on a given node is **skipped, not an error**, so one home
+  profile applies across heterogeneous boards. Narrowing `ap_bands` on a
+  re-apply prunes the now-stale `omm_ap_<band>` sections.
+
 Lower-level, per-interface policy such as **VLANs and firewall rules** sits
 below this and is left to OpenWrt's own tooling (LuCI / UCI). OMM does not
 author that configuration: the `vlans` field on a profile is stored but not

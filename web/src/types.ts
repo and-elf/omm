@@ -39,6 +39,11 @@ export interface Profile {
   // wifi-device directly. Precedence: radio, then band, then daemon default.
   band?: string
   radio?: string
+  // Bands the client AP is broadcast on ("2g" | "5g" | "6g"), each resolved to
+  // that node's matching radio so phones on either band join one SSID. Empty
+  // defaults to also broadcasting on 2.4 GHz (a dual-band AP); set a single
+  // band (e.g. ["5g"]) to broadcast on that band only.
+  ap_bands?: string[]
   vlans: string[] | null
 }
 

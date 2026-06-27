@@ -187,12 +187,14 @@ func NewManager(store storage.Store, uciClient uci.Client, cfg Config) ProfileMa
 // device that has no meshd wireless yet — the earlier "apply profile: not
 // found" was a plain `uci set` against a non-existent `mesh` section.
 //
-// Two interfaces are authored on the configured radio, both attached to `lan`
-// so meshed nodes and AP clients share the controller's existing LAN and its
-// DHCP:
+// The interfaces are authored attached to `lan` so meshed nodes and AP clients
+// share the controller's existing LAN and its DHCP:
 //   - omm_mesh: the 802.11s backhaul (mesh_id = MeshSSID), so other nodes mesh in.
 //   - omm_ap:   a client-facing AP (ssid = APSSID, defaulting to MeshSSID), so
 //     phones/laptops can join and get an address.
+//   - omm_ap_<band>: additional client APs per APBands (default: also 2.4 GHz),
+//     so single-band clients on another band can join the same SSID. See
+//     resolveAPTargets.
 //
 // Each section is only authored when its SSID is set; absent both, the radio is
 // left untouched.
@@ -292,22 +294,32 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 	}
 
 	if apSSID != "" {
-		ap := map[string]string{
-			"device":  apRadio,
-			"mode":    "ap",
-			"ssid":    apSSID,
-			"network": "lan",
+		targets := m.resolveAPTargets(ctx, profile, apRadio)
+		keep := make(map[string]bool, len(targets))
+		for _, t := range targets {
+			ap := map[string]string{
+				"device":  t.radio,
+				"mode":    "ap",
+				"ssid":    apSSID,
+				"network": "lan",
+			}
+			if apKey != "" {
+				ap["encryption"] = "psk2"
+				ap["key"] = apKey
+			} else {
+				ap["encryption"] = "none"
+			}
+			if err := m.uciClient.SetSection(ctx, "wireless", t.section, "wifi-iface", ap); err != nil {
+				return fmt.Errorf("set ap wifi-iface %q: %w", t.section, err)
+			}
+			keep[t.section] = true
+			enable[t.radio] = true
 		}
-		if apKey != "" {
-			ap["encryption"] = "psk2"
-			ap["key"] = apKey
-		} else {
-			ap["encryption"] = "none"
+		// Remove any secondary AP a previous (wider) APBands left behind, so the
+		// live wireless converges to exactly the requested bands.
+		if err := m.pruneStaleSecondaryAPs(ctx, keep); err != nil {
+			return err
 		}
-		if err := m.uciClient.SetSection(ctx, "wireless", apSection, "wifi-iface", ap); err != nil {
-			return fmt.Errorf("set ap wifi-iface: %w", err)
-		}
-		enable[apRadio] = true
 	}
 
 	for radio := range enable {
@@ -488,22 +500,96 @@ func (m *Manager) resolveRadio(ctx context.Context, profile models.Profile) (str
 		if err != nil {
 			return "", fmt.Errorf("list wireless devices: %w", err)
 		}
-		// Pick the lowest-numbered matching radio for determinism (radio0 <
-		// radio1 sorts correctly as strings for these names).
-		match := ""
-		for name, opts := range sections {
-			if opts[".type"] == "wifi-device" && opts["band"] == profile.Band {
-				if match == "" || name < match {
-					match = name
-				}
-			}
-		}
+		match := lowestRadioForBand(sections, profile.Band)
 		if match == "" {
 			return "", fmt.Errorf("no radio for band %q on this device", profile.Band)
 		}
 		return match, nil
 	}
 	return m.cfg.Radio, nil
+}
+
+// lowestRadioForBand returns the lowest-numbered wifi-device whose band matches,
+// or "" if none. The lowest is chosen for determinism — radio0 < radio1 sorts
+// correctly as strings for these names.
+func lowestRadioForBand(sections map[string]map[string]string, band string) string {
+	match := ""
+	for name, opts := range sections {
+		if opts[".type"] == "wifi-device" && opts["band"] == band {
+			if match == "" || name < match {
+				match = name
+			}
+		}
+	}
+	return match
+}
+
+// apTarget is one client-AP wifi-iface to author: its UCI section name and the
+// wifi-device that hosts it.
+type apTarget struct {
+	section string
+	radio   string
+}
+
+// resolveAPTargets lists the client-AP wifi-iface(s) to author, deduped by
+// radio. The primary AP (section omm_ap) is always on apRadio. Additional bands
+// — profile.APBands when set, else the 2.4 GHz mesh band by default so every
+// home gets a dual-band AP out of the box — each resolve to their lowest radio
+// and, when that radio is not already covered, are authored as omm_ap_<band>.
+// A band with no radio on this node is skipped (a home profile applies across
+// heterogeneous boards; not every node has every band), so apply still
+// succeeds. Set APBands to the AP band alone (e.g. ["5g"]) to opt out of the
+// default 2.4 GHz AP.
+func (m *Manager) resolveAPTargets(ctx context.Context, profile models.Profile, apRadio string) []apTarget {
+	targets := []apTarget{{section: apSection, radio: apRadio}}
+	used := map[string]bool{apRadio: true}
+
+	bands := profile.APBands
+	if len(bands) == 0 {
+		bands = []string{m.cfg.MeshBand}
+	}
+
+	var sections map[string]map[string]string
+	for _, band := range bands {
+		band = strings.ToLower(strings.TrimSpace(band))
+		if band == "" {
+			continue
+		}
+		if sections == nil {
+			s, err := m.uciClient.Sections(ctx, "wireless")
+			if err != nil {
+				// Can't resolve extra bands; the primary AP still applies.
+				return targets
+			}
+			sections = s
+		}
+		radio := lowestRadioForBand(sections, band)
+		if radio == "" || used[radio] {
+			continue
+		}
+		used[radio] = true
+		targets = append(targets, apTarget{section: apSection + "_" + band, radio: radio})
+	}
+	return targets
+}
+
+// pruneStaleSecondaryAPs deletes any secondary client-AP wifi-iface (omm_ap_*)
+// not in the desired set, so narrowing APBands removes orphaned APs. The
+// primary omm_ap is never pruned here (its name lacks the trailing underscore).
+func (m *Manager) pruneStaleSecondaryAPs(ctx context.Context, keep map[string]bool) error {
+	sections, err := m.uciClient.Sections(ctx, "wireless")
+	if err != nil {
+		return fmt.Errorf("list wireless sections: %w", err)
+	}
+	for name, opts := range sections {
+		if opts[".type"] != "wifi-iface" || !strings.HasPrefix(name, apSection+"_") || keep[name] {
+			continue
+		}
+		if err := m.uciClient.Delete(ctx, "wireless", name); err != nil {
+			return fmt.Errorf("delete stale ap %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // resolveMeshRadio picks the wifi-device for the 802.11s mesh. An explicit
@@ -521,18 +607,10 @@ func (m *Manager) resolveMeshRadio(ctx context.Context, apRadio string) string {
 	if err != nil {
 		return apRadio
 	}
-	match := ""
-	for name, opts := range sections {
-		if opts[".type"] == "wifi-device" && opts["band"] == m.cfg.MeshBand {
-			if match == "" || name < match {
-				match = name
-			}
-		}
+	if match := lowestRadioForBand(sections, m.cfg.MeshBand); match != "" {
+		return match
 	}
-	if match == "" {
-		return apRadio
-	}
-	return match
+	return apRadio
 }
 
 func (m *Manager) ApplyProfileForHome(ctx context.Context, homeID string) error {
