@@ -10,6 +10,7 @@
 #   ----------   ------  -----  --------------------------
 #   lyra-ac2200  arm     7      arm_cortex-a7_neon-vfpv4   (ipq40xx, Cortex-A7)
 #   zb8103ax     arm64   -      aarch64_cortex-a53         (Cortex-A53)
+#   ax3600       arm64   -      aarch64_cortex-a53         (Xiaomi AX3600, ipq807x, Cortex-A53)
 #
 # The frontend is embedded via go:embed and is arch-independent, so it is built
 # once (first target) and reused (SKIP_FRONTEND=1) for the rest.
@@ -32,6 +33,7 @@ cd "$(dirname "$0")/.."
 DEVICES=(
 	"lyra-ac2200|arm|7|arm_cortex-a7_neon-vfpv4|40"
 	"zb8103ax|arm64||aarch64_cortex-a53|183"
+	"ax3600|arm64||aarch64_cortex-a53|183"
 )
 
 # verify_elf PATH EXPECTED_MACHINE: read e_machine (offset 18, low byte) and
@@ -92,6 +94,6 @@ for spec in "${DEVICES[@]}"; do
 done
 
 if [ "$built" = 0 ]; then
-	echo "no matching device built; known: lyra-ac2200 zb8103ax" >&2
+	echo "no matching device built; known: lyra-ac2200 zb8103ax ax3600" >&2
 	exit 1
 fi

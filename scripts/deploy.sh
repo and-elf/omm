@@ -80,14 +80,24 @@ if [ "$reset" = 1 ] && [ -n "$controller" ]; then
 fi
 
 if [ "$swap" = 1 ]; then
-	echo "==> $host: detecting arch"
+	echo "==> $host: detecting device"
+	# Two of the test boards share one ISA — the Xiaomi AX3600 and the ZB8103AX
+	# are both aarch64_cortex-a53, so `uname -m` alone can't tell them apart. Read
+	# the exact board model first and special-case those, then fall back to arch
+	# for any board we don't name explicitly (their per-ISA binaries are
+	# interchangeable within the group anyway; the label just picks bin/<device>).
+	board="$(ssh_ 'cat /tmp/sysinfo/board_name 2>/dev/null')"
 	arch="$(ssh_ 'uname -m')"
-	case "$arch" in
-	aarch64)      device=zb8103ax ;;
-	armv7l|armv7) device=lyra-ac2200 ;;
-	*) echo "unsupported arch '$arch' on $host (known: aarch64, armv7l)" >&2; exit 1 ;;
+	case "$board" in
+	xiaomi,ax3600) device=ax3600 ;;
+	*)
+		case "$arch" in
+		aarch64)      device=zb8103ax ;;
+		armv7l|armv7) device=lyra-ac2200 ;;
+		*) echo "unsupported board '$board' / arch '$arch' on $host (known boards: xiaomi,ax3600; archs: aarch64, armv7l)" >&2; exit 1 ;;
+		esac ;;
 	esac
-	echo "    $arch -> $device"
+	echo "    ${board:-$arch} -> $device"
 
 	if [ "$build" = 1 ]; then
 		echo "==> building $device"
