@@ -152,6 +152,10 @@ export interface TopologyClient {
   band?: string
   tx_rate?: number
   rx_rate?: number
+  /** DHCP-assigned IPv4 address; absent when the client has no lease. */
+  ip?: string
+  /** DHCP-offered hostname; absent when the client offered none or has no lease. */
+  hostname?: string
 }
 
 export interface Topology {

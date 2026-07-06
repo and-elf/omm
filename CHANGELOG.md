@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Topology clients labelled by hostname/IP, not MAC (#35).** The topology view
+  showed each associated client as a raw MAC, which is poor UX. `GET /topology`
+  now enriches clients with their DHCP-assigned `ip` and `hostname`, resolved on
+  the controller from dnsmasq's lease file (`/tmp/dhcp.leases`) — a member node
+  is a bridged dumb AP and holds no leases, so resolution happens where the merged
+  graph is served. The view labels a client by hostname, falling back to IP, then
+  the MAC when neither resolved; the MAC and IP are kept on the node's data. A
+  client with no lease (static, self-addressed, or transient) renders by MAC as
+  before.
 - **Dual-band / multi-band client AP (#36).** A claimed home previously
   broadcast its client AP on a single radio (typically 5 GHz), so 2.4 GHz-only
   devices had no AP to join. `ApplyProfile` now authors the client AP across

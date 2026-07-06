@@ -1,4 +1,4 @@
-import type { Topology } from '@/types'
+import type { Topology, TopologyClient } from '@/types'
 
 export interface CyElement {
   group: 'nodes' | 'edges'
@@ -54,6 +54,14 @@ export function relativeTime(lastSeen: number | undefined, now: number): string 
   if (d < 3600) return `${Math.round(d / 60)}m ago`
   if (d < 86400) return `${Math.round(d / 3600)}h ago`
   return `${Math.round(d / 86400)}d ago`
+}
+
+/**
+ * Picks the friendliest label for a client: its DHCP hostname, else its IP, and
+ * only the raw MAC as a last resort — tracking MACs is poor UX (#35).
+ */
+export function clientLabel(client: TopologyClient): string {
+  return client.hostname || client.ip || client.mac
 }
 
 /**
@@ -132,9 +140,11 @@ export function toElements(topo: Topology, now: number = Date.now() / 1000): CyE
   for (const client of topo.clients ?? []) {
     const id = `client:${client.mac}`
     const band = client.band ? ` ${client.band}` : ''
+    // Label by hostname/IP when the DHCP lease resolved it; keep mac/ip in data
+    // so the raw identifiers are still available (e.g. for a future detail view).
     elements.push({
       group: 'nodes',
-      data: { id, label: client.mac },
+      data: { id, label: clientLabel(client), mac: client.mac, ip: client.ip },
       classes: 'client',
     })
     elements.push({

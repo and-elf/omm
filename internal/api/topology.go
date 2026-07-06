@@ -24,7 +24,13 @@ func (h *apiHandler) getTopology(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 	defer cancel()
 	local := h.topology.Collect(ctx)
-	writeJSON(w, http.StatusOK, h.topoAgg.Merge(local, h.nodeInventory(ctx)...))
+	graph := h.topoAgg.Merge(local, h.nodeInventory(ctx)...)
+	// Enrich clients with their DHCP-assigned IP/hostname (this controller runs
+	// the home's authoritative DHCP), so the view labels them by name not MAC (#35).
+	if h.leases != nil {
+		graph = topology.LabelClients(graph, h.leases.Leases(ctx))
+	}
+	writeJSON(w, http.StatusOK, graph)
 }
 
 // nodeInventory lists the onboarded nodes belonging to this controller's home so

@@ -93,6 +93,12 @@ type Client struct {
 	Band   string `json:"band,omitempty"`
 	TxRate int    `json:"tx_rate,omitempty"`
 	RxRate int    `json:"rx_rate,omitempty"`
+	// IP and Hostname are the client's DHCP-assigned address and name, resolved
+	// on the controller from its DHCP leases (a member node holds none). They let
+	// the view show a recognizable name instead of a raw MAC (#35). Empty when the
+	// client has no lease — a static, self-addressed or transient station.
+	IP       string `json:"ip,omitempty"`
+	Hostname string `json:"hostname,omitempty"`
 }
 
 // Graph is the assembled topology.
