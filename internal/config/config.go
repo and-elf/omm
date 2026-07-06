@@ -67,30 +67,35 @@ type Config struct {
 	BackhaulIface string   // iface whose carrier classifies backhaul (default "br-lan"; e.g. eth0/wan); empty => unknown
 
 	// batman-adv routing layer. When enabled, ApplyProfile authors a batman-adv
-	// mesh (bat0 soft interface + a hard interface per backhaul link) and bridges
-	// bat0 into the LAN, instead of bridging the 802.11s mesh straight onto lan —
-	// giving loop-free multi-hop forwarding across any mix of wired and wireless
-	// links. Default on; it auto-degrades to the direct mesh-on-lan bridge when
-	// the batman-adv module/netifd proto is absent. A joined node auto-detects its
-	// wired backhaul uplink (the `wan` jack toward the controller, when cabled) and
-	// enslaves only that to bat0, taking it out of br-lan; client jacks stay bridge
-	// ports. BatmanPorts (MESHD_BATMAN_PORTS) is an explicit override for deliberate
-	// wiring (e.g. a controller's downstream wired port, which auto-detection never
-	// touches). See doc/network-model.md.
+	// mesh (bat0 soft interface + the 802.11s mesh hard interface) and bridges bat0
+	// into the LAN, instead of bridging the mesh straight onto lan — so the mesh,
+	// when it activates, forwards loop-free multi-hop across a wireless chain.
+	// Default on; it auto-degrades to the direct mesh-on-lan bridge when the
+	// batman-adv module/netifd proto is absent. The mesh is a carrier-loss backhaul
+	// standby: wired ports stay plain br-lan relays and the daemon's failover brings
+	// the mesh up only when the wired uplink drops (see uplink_port, below).
+	// BatmanPorts (MESHD_BATMAN_PORTS) is an explicit override that enslaves the
+	// named wired ports to bat0 as batman hardifs (a deliberate wired batman
+	// backhaul between two batman nodes) — empty by default, so no wired port is
+	// enslaved. See doc/network-model.md.
 	BatmanEnable      bool
 	BatmanPorts       []string
 	BatmanRoutingAlgo string
 
 	// Network posture: meshd manages network/dhcp/firewall by lifecycle state
 	// (unclaimed -> Guest dumb-AP so discovery works; claimed controller ->
-	// gateway; joined node -> mesh node). Opt-in (default false) because it
-	// reconfigures the network and can strand a hand-wired device; enable only
-	// after verifying the Guest transition on the target board. UplinkPort is the
-	// wired uplink device bridged into br-lan in Guest posture; empty (default)
-	// auto-detects it from network.wan.device, so any jack works without
-	// per-board config (incl. a single-jack AP wired as `wan`). LanDevice is the
-	// UCI section of the LAN bridge device whose `ports` it edits. See
-	// doc/network-posture.md.
+	// gateway; joined node -> mesh node). Default on: this is what makes any
+	// ethernet jack "just work" on a non-controller node — the routed wan is
+	// stood down so its jack can join br-lan as a client/backhaul port (issue
+	// #42), and a non-controller never runs a rogue DHCP server on the home
+	// segment. Set manage_network=0 to opt out entirely, for an operator who
+	// hand-wires the device and does not want meshd to touch its network.
+	// UplinkPort is the wired uplink jack: it is the device netposture folds into
+	// br-lan, and the port whose carrier the backhaul failover watches to bring the
+	// mesh up on wire loss. Empty (default) auto-detects it — netposture from
+	// network.wan.device, failover from the bridge port reaching the gateway — so
+	// any jack works without per-board config. LanDevice is the UCI section of the
+	// LAN bridge device whose `ports` it edits. See doc/network-posture.md.
 	ManageNetwork bool
 	UplinkPort    string
 	LanDevice     string
@@ -174,7 +179,7 @@ func Load() Config {
 		BatmanPorts:       splitList(os.Getenv("MESHD_BATMAN_PORTS")),
 		BatmanRoutingAlgo: envOr("MESHD_BATMAN_ROUTING_ALGO", "BATMAN_IV"),
 
-		ManageNetwork: envBool("MESHD_MANAGE_NETWORK"),
+		ManageNetwork: envBoolOr("MESHD_MANAGE_NETWORK", true),
 		UplinkPort:    os.Getenv("MESHD_UPLINK_PORT"),
 		LanDevice:     envOr("MESHD_LAN_DEVICE", "@device[0]"),
 

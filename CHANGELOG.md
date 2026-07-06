@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the MAC when neither resolved; the MAC and IP are kept on the node's data. A
   client with no lease (static, self-addressed, or transient) renders by MAC as
   before.
+- **Any ethernet jack just works on a non-controller node (#42).** A satellite's
+  wan jack was a dead routed wan: only its lan jack(s) carried clients or extended
+  the network, so plugging a computer — or another node — into the wan jack did
+  nothing. On a non-controller node the network posture now folds **every**
+  ethernet jack (incl. the wan jack, `network.wan.device`) into `br-lan` as a plain
+  bridge **relay** port and stands the routed wan down, so any device works on any
+  port with zero configuration. A controller keeps its wan jack as the routed
+  internet uplink.
 - **Dual-band / multi-band client AP (#36).** A claimed home previously
   broadcast its client AP on a single radio (typically 5 GHz), so 2.4 GHz-only
   devices had no AP to join. `ApplyProfile` now authors the client AP across
@@ -38,30 +46,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   auto-selected by band, which picks the AX3600's 2.4 GHz radio (`radio2`).
 
 ### Changed
+- **Backhaul model: wired is primary, the mesh is a carrier-loss backup.** The
+  short-lived "batman-always-on, per-port enslavement" model (which routed a wired
+  node over the *wireless* mesh and broke ethernet clients in a mixed
+  wired+wireless bridge) is replaced by the failover model: every ethernet port is
+  a plain `br-lan` relay, and the 802.11s mesh + batman-adv is authored as a
+  **standby** that the daemon's carrier-toggle failover brings up only when the
+  wired uplink loses carrier (and tears back down when the wire returns) — so the
+  fast wire is always preferred and wired + mesh never bridge-loop. The uplink port
+  to watch is auto-detected (the bridge port through which the node reaches its
+  gateway, so any jack works) or set via `uplink_port`. Wired ports are enslaved to
+  batman only via an explicit `batman_ports`; batman still forwards the mesh
+  loop-free multi-hop when it activates. Restores `internal/backhaul` (the switch
+  loop) and removes the per-port beacon classifier (`PortScan` / `SniffOMMBeacon` /
+  `Classify`).
+- **Network posture management now defaults ON (`manage_network`, opt-out).**
+  Making a wan jack usable as a client/backhaul port physically requires standing
+  down its routed role first — a netdev cannot be both `network.wan`'s device and
+  a `br-lan` member, and a satellite that keeps its own DHCP/gateway becomes a
+  rogue DHCP server on the home segment. That bridged dumb-AP posture used to sit
+  behind `manage_network=0`, so #42 could not be delivered without it. The flag
+  now defaults to `1`: a non-controller stands down its routed wan and every
+  ethernet jack joins the home L2, while a controller keeps the stock routed-wan
+  gateway (never disrupted). Set `manage_network=0` to opt out entirely on a
+  device you hand-wire and do not want meshd to reconfigure.
 - **Mesh-node network posture now bridges into the home (single gateway).** A
   claimed satellite (`manage_network=1`) previously only stood down its
   authoritative DHCP, leaving its own routed/NAT'd `wan` up — so its bridged
   802.11s mesh was an island and mesh traffic could not reach the home WAN, which
   egresses only through the controller's gateway over the mesh. The Mesh-node
-  posture now authors the same bridged shape as Guest: `lan` becomes a DHCP
+  posture now authors the same bridged shape as Guest: it folds every ethernet
+  jack (incl. the wan jack) into `br-lan` as a plain relay, `lan` becomes a DHCP
   client, the routed `wan`/`wan6` are disabled, and authoritative DHCP is stood
-  down, so the node's default route points at the controller. When batman-adv is
-  the forwarding layer (`MESHD_BATMAN`, the default) the uplink is left to the
-  batman port classifier instead of being folded into `br-lan` — `bat0` is the
-  bridged backhaul and re-adding the uplink on every apply would fight the
-  classifier and recreate the storming `br-lan`+`bat0` double path (the uplink is
-  already a `br-lan` candidate from the Guest phase). Without batman the posture
-  folds the uplink in itself; Guest folds regardless (no active home yet ⇒ no
-  `bat0` to defer to). Still gated behind `manage_network` (off by default).
-  Verified end-to-end on hardware: reset → Guest → wired auto-onboard → mesh-node,
-  surviving both a meshd restart and a reboot.
+  down, so the node is a pure L2 bridge into the home and its default route points
+  at the controller. The 802.11s mesh stays a carrier-loss backhaul standby (see
+  the backhaul-model change above), so wired + mesh never bridge-loop. Verified
+  end-to-end on hardware: reset → wired auto-onboard → mesh-node, pulling the real
+  home profile.
 - **Zero-touch defaults.** A fresh kit now self-forms with no configuration: the
   controller's `adopt_policy` defaults to `onlink` (auto-adopt only nodes
-  verified to be on its own LAN) and a node's `auto_onboard_wired` defaults to on
-  (with `backhaul_iface` defaulting to `br-lan` so the wired backhaul is
-  classified), so powering the first device makes it a controller and cabling a
-  node joins it. Set `adopt_policy=off` / `auto_onboard_wired=0` to require the
-  wizard. Network posture management (`manage_network`) stays opt-in.
+  verified to be on its own LAN) and a node's `auto_onboard_wired` defaults to on,
+  so powering the first device makes it a controller and cabling a node joins it.
+  Set `adopt_policy=off` / `auto_onboard_wired=0` to require the wizard. Network
+  posture management (`manage_network`) defaults on — set it to `0` to opt out.
 
 ### Fixed
 - **Topology view now draws lines between the real nodes (#27/#28/#33).**

@@ -121,21 +121,17 @@ type Config struct {
 	// BatmanRoutingAlgo selects batman-adv's metric (default "BATMAN_IV").
 	BatmanRoutingAlgo string
 	// BatmanPorts are wired backhaul ethernet devices to enslave to bat0 as hard
-	// interfaces, so a wired hop is routed by batman-adv too. Empty means no wired
-	// batman link. BatmanPortsFn overrides this when set.
+	// interfaces, so a wired hop is routed by batman-adv too (a deliberate wired
+	// batman backhaul between two batman nodes). Empty (default) means no wired
+	// batman link — wired ports stay plain br-lan relays and the mesh is the only
+	// batman link, run as a carrier-loss standby (see MeshStandby).
 	BatmanPorts []string
-	// BatmanPortsFn, when set, supplies the enslaved wired ports dynamically at
-	// each apply, overriding BatmanPorts. The daemon's reconcile loop owns this set
-	// — it scans every wired port for an OMM peer beacon and updates it as peers
-	// appear/disappear — so a profile re-apply re-asserts the live set rather than
-	// a stale snapshot.
-	BatmanPortsFn func() []string
-	// MeshStandby keeps the 802.11s mesh an admin standby (authored disabled) under
-	// batman instead of an always-on hardif. It is set for a node whose wired
-	// uplink is NOT enslaved to batman (a node on the controller's shared LAN,
-	// where the wire stays plain-bridged): the carrier-toggle failover then enables
-	// the mesh only on wire loss, so wired + mesh never bridge-loop. Off (always-on
-	// mesh) when the wire is a batman hardif or there is no wired uplink.
+	// MeshStandby keeps the 802.11s mesh an admin standby (authored disabled)
+	// instead of an always-on hardif. It is set for a non-controller node with a
+	// wired uplink: the daemon's carrier-toggle failover then enables the mesh only
+	// on wire loss, so wired + mesh never bridge-loop. Off (always-on mesh) for a
+	// controller (the mesh root), a wireless-only node, or a node with an explicit
+	// wired batman backhaul.
 	MeshStandby bool
 	// LanDevice is the UCI section of the LAN bridge device bat0 is bridged into
 	// (e.g. "@device[0]"). Empty skips bridging bat0 into the LAN.
@@ -225,14 +221,10 @@ func (m *Manager) ApplyProfile(ctx context.Context, profile models.Profile) erro
 	meshNetwork := "lan"
 	var bm *batman.Manager
 	if m.cfg.BatmanEnable && profile.MeshSSID != "" {
-		wiredPorts := m.cfg.BatmanPorts
-		if m.cfg.BatmanPortsFn != nil {
-			wiredPorts = m.cfg.BatmanPortsFn()
-		}
 		bm = batman.NewManager(m.uciClient, batman.Config{
 			Iface:       m.cfg.BatmanIface,
 			RoutingAlgo: m.cfg.BatmanRoutingAlgo,
-			WiredPorts:  wiredPorts,
+			WiredPorts:  m.cfg.BatmanPorts,
 			LanDevice:   m.cfg.LanDevice,
 			MAC:         m.cfg.BatmanMAC,
 		})

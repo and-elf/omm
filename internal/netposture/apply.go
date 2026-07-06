@@ -30,14 +30,6 @@ type Config struct {
 	// "br_lan"). Empty skips the bridge edit, so a board with no LAN bridge is
 	// left alone rather than mis-bridged.
 	LanDevice string
-	// BatmanActive reports whether batman-adv is the forwarding layer on this
-	// node. When true, `bat0` is the device bridged into br-lan and the physical
-	// uplink is a batman hardif owned by the batman port classifier — so the
-	// Mesh-node posture must NOT fold the uplink into br-lan (doing so on every
-	// apply would fight the classifier: a port in both br-lan and bat0 is the
-	// redundant L2 path that storms). The Guest posture folds regardless, since a
-	// still-discovering device has no home/profile yet and thus no live bat0.
-	BatmanActive bool
 }
 
 // Manager authors a node's network posture to UCI.
@@ -67,21 +59,18 @@ func (m *Manager) Apply(ctx context.Context, role Role) error {
 }
 
 // applyBridgedDumbAP authors the bridged dumb-AP posture shared by the Guest and
-// Mesh-node roles: make lan a DHCP client, disable the routed wan, and stand down
-// the authoritative LAN DHCP server. The node then sits on the home L2 with no
-// routed/NAT'd wan of its own, so its clients — and its 802.11s mesh, which the
-// batman layer bridges into the same br-lan — reach the internet through the
-// controller's single gateway instead of a local NAT that would strand mesh
-// traffic from the wan. When foldUplink is set, the wired uplink jack is also
-// added to br-lan; callers clear it when the batman classifier owns the physical
-// port (see Config.BatmanActive). The ommsetup (setup-AP) sections are never
-// touched.
-func (m *Manager) applyBridgedDumbAP(ctx context.Context, foldUplink bool) error {
-	if foldUplink {
-		if uplink := m.uplinkPort(ctx); uplink != "" && m.cfg.LanDevice != "" {
-			if err := m.uci.AddListItem(ctx, "network", m.cfg.LanDevice, "ports", uplink); err != nil {
-				return fmt.Errorf("bridge uplink into lan: %w", err)
-			}
+// Mesh-node roles: fold the wired uplink jack into br-lan, make lan a DHCP
+// client, disable the routed wan, and stand down the authoritative LAN DHCP
+// server. The node then sits on the home L2 with no routed/NAT'd wan of its own —
+// every ethernet jack is a plain bridge relay port (issue #42) and its clients
+// reach the internet through the controller's single gateway. The 802.11s mesh is
+// a carrier-loss backhaul standby (the daemon's failover owns its enabled state);
+// while the wire is up, the mesh is down, so there is no wired+mesh bridge loop.
+// The ommsetup (setup-AP) sections are never touched.
+func (m *Manager) applyBridgedDumbAP(ctx context.Context) error {
+	if uplink := m.uplinkPort(ctx); uplink != "" && m.cfg.LanDevice != "" {
+		if err := m.uci.AddListItem(ctx, "network", m.cfg.LanDevice, "ports", uplink); err != nil {
+			return fmt.Errorf("bridge uplink into lan: %w", err)
 		}
 	}
 	sets := []set{
@@ -95,14 +84,11 @@ func (m *Manager) applyBridgedDumbAP(ctx context.Context, foldUplink bool) error
 
 // applyGuest is the unclaimed dumb-AP posture: it authors the bridged posture so
 // the node is L2-adjacent to a controller and discovery broadcasts reach the
-// listener instead of being dropped at a routed, firewalled wan. It always folds
-// the uplink into br-lan: a still-discovering device has no active home and thus
-// no profile/bat0, so batman is not yet forwarding and there is no classifier to
-// defer to — L2 adjacency is what discovery needs. The Guest fold is also what
-// first makes the uplink a br-lan-member candidate for the batman classifier once
-// the device is later claimed.
+// listener instead of being dropped at a routed, firewalled wan. It folds every
+// wired jack (incl. the wan jack) into br-lan so discovery works whichever jack
+// the installer used.
 func (m *Manager) applyGuest(ctx context.Context) error {
-	return m.applyBridgedDumbAP(ctx, true)
+	return m.applyBridgedDumbAP(ctx)
 }
 
 // applyController restores the gateway posture: un-bridge the uplink, re-enable
@@ -123,20 +109,14 @@ func (m *Manager) applyController(ctx context.Context) error {
 }
 
 // applyMeshNode is a claimed satellite: it authors the bridged posture so the
-// node is a pure L2 bridge into the home. It must not run authoritative DHCP (the
-// controller serves the home), and it must not keep a routed/NAT'd wan of its own
-// — otherwise its bridged 802.11s mesh is an island and mesh traffic can't reach
-// the home WAN, which egresses only via the controller's gateway.
-//
-// It folds the uplink into br-lan ONLY when batman is not the forwarding layer.
-// With batman active, bat0 is the bridged backhaul and the physical uplink is a
-// batman hardif owned by the port classifier (which enslaves peer-facing br-lan
-// ports out of the bridge); re-adding the uplink to br-lan on every posture apply
-// would undo that enslavement and recreate the storming br-lan+bat0 double path.
-// The uplink is already a br-lan-member candidate from the Guest phase, so the
-// classifier still sees it — netposture just stops fighting for it.
+// node is a pure L2 bridge into the home, with every ethernet jack (incl. the wan
+// jack) a plain relay port. It must not run authoritative DHCP (the controller
+// serves the home), and it must not keep a routed/NAT'd wan of its own —
+// otherwise it strands the home L2 from the controller's single gateway. The
+// 802.11s mesh stays a carrier-loss backhaul standby (the daemon's failover
+// enables it only when the wired uplink drops), so wired + mesh never bridge-loop.
 func (m *Manager) applyMeshNode(ctx context.Context) error {
-	return m.applyBridgedDumbAP(ctx, !m.cfg.BatmanActive)
+	return m.applyBridgedDumbAP(ctx)
 }
 
 type set struct{ pkg, section, option, value string }

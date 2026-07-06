@@ -39,7 +39,7 @@ start_service() {
 	config_get led_name main led_name green:status
 	config_get auto_onboard_wired main auto_onboard_wired 1
 	config_get onboard_grace main onboard_grace 20s
-	config_get manage_network main manage_network 0
+	config_get manage_network main manage_network 1
 	config_get uplink_port main uplink_port ""
 	config_get lan_device main lan_device "@device[0]"
 	config_get batman main batman 1

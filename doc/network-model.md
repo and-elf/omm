@@ -92,61 +92,43 @@ is present), `ApplyProfile` does **not** bridge the mesh interface straight onto
   once without a broadcast storm — batman detects the redundant L2 path and
   dedups it, where plain bridge STP could not (the consumer switches in the home
   kit do not forward STP BPDUs across the wired path).
-* One **hard interface** (`proto 'batadv_hardif'`, `master 'bat0'`) per backhaul
-  link enslaved to the mesh: the 802.11s `omm_mesh` vif **and** the node's wired
-  backhaul uplink. batman-adv treats wired and wireless links uniformly and
-  computes the best loop-free path across the mix.
+* One **hard interface** (`proto 'batadv_hardif'`, `master 'bat0'`) for the
+  802.11s `omm_mesh` vif, so the mesh forwards loop-free multi-hop when it is up.
 * `bat0` is the only batman device bridged into `br-lan`; DHCP and clients ride
   on top of it.
 
-**Auto backhaul detection (zero-touch, any topology).** No node needs its
-backhaul ports named in config. Every meshd broadcasts a small **presence
-beacon** to the discovery UDP port, and every node continuously classifies each
-of its wired (`br-lan`-member) ethernet ports by **passively sniffing that port
-for a peer's beacon** (a raw `AF_PACKET` listener that ignores its own outgoing
-frames — it neither enslaves the port nor transmits, so it is safe while the port
-is a plain bridge member):
+**Wired is primary; the mesh is a carrier-loss backup.** Every ethernet port is
+a plain `br-lan` **relay** port (the network posture folds the `wan` jack in too,
+so any device works on any jack — see [network posture](network-posture.md)), and
+inter-node wired links carry the home L2 by ordinary bridging over the fast wire.
+The 802.11s mesh + `bat0` is authored as a **standby**: on a non-controller node
+the mesh vif is `disabled`, and the daemon's **carrier-toggle failover** enables
+it only when the wired uplink loses carrier, tearing it back down when the wire
+returns. So the wire is always preferred and a wired + wireless bridge loop never
+forms (the mesh is down whenever the wire is up).
 
-* **Port with an OMM peer beacon** → enslaved to `bat0` as a batadv hardif and
-  taken *out* of `br-lan` (a device in both `br-lan` and batman is the redundant
-  L2 path that storms). Each enslaved port also gets a unique locally-administered
-  MAC, so shared-MAC DSA switch ports don't collide on `bat0`.
-* **Port with no beacon** (a plain client device, or nothing) → left a normal
-  `br-lan` client port, so wired clients get DHCP on `bat0` as usual.
-
-The **802.11s mesh is always on**, and the mesh radio is **auto-selected by band**
-(2.4 GHz — the only legal/interoperable mesh band on this gear). Because every
-inter-node wire is a batman link and the mesh is always up, **batman-adv + BLA own
-all path selection and loop avoidance** — there is no carrier-toggle failover.
-Pulling a wired uplink just drops that hardif's carrier and batman re-routes over
-the mesh within a second; replugging restores the wire as primary.
-
-This is bootstrap-safe and needs no manual sequencing: beacons are independent of
-batman, so two wired OMM nodes each see the other and enslave their own side
-(taking it out of `br-lan` — loop-safe regardless of the far end), and the
-controller auto-enslaves the port facing a node exactly the same way. A reconcile
-loop re-runs the scan periodically, so ports promote/demote as nodes and clients
-are plugged and unplugged.
-
-> The one topology this can't serve: a single physical port carrying **both** an
-> OMM node **and** plain client devices (a shared dumb switch) — a port is either a
-> batman backhaul link or a client bridge port, not both. Point-to-point
-> node↔node, or node↔clients-per-port, are fine.
-
-> `MESHD_BATMAN_PORTS` remains an explicit override: when set, those ports are
-> enslaved directly and the auto-scan/reconcile is skipped.
-
-Because batman-adv forwards at layer 2.5 across *any* mix of enslaved links, a
-node need not distinguish "edge" from "relay": a wired node automatically keeps
-relaying for a wireless child, and a chain like
+The uplink port whose carrier is watched is **auto-detected** — the bridge port
+through which the node reaches its default gateway, so whichever jack the
+installer used is the one that triggers failover — or set explicitly with
+`uplink_port`. A **controller** (the mesh root, so wireless children can always
+reach it) and a **wireless-only** node keep the mesh always-on; only a
+wired-uplink non-controller runs it as a standby.
 
 ```text
-controller ──wired──▶ AP ──wireless──▶ AP ──wired──▶ device
+controller ──wired──▶ AP ──wired──▶ AP ──wired──▶ device      (normal: all wired, fast)
+controller ◀wireless─ AP                                       (that AP's wire pulled: mesh backup)
 ```
 
-is just a route batman-adv selects. This supersedes the per-node
-"disable the mesh while my own wire is up" failover (a workaround for the
-bridge loop), which is **not used** when batman-adv is active.
+Reordering the wired chain or moving a cable to any jack needs no config: each
+node re-detects its uplink and relays over the wire; only a node that actually
+loses its wire falls back to the mesh, and its downstream nodes keep relaying
+through it.
+
+> `MESHD_BATMAN_PORTS` is an explicit override: the named ports are enslaved to
+> `bat0` as batman hardifs (a deliberate wired batman backhaul between two batman
+> nodes — each gets a unique locally-administered MAC so shared-MAC DSA ports
+> don't collide), and that node's mesh runs always-on rather than as a standby.
+> Empty by default, so no wired port is enslaved.
 
 > Without batman-adv (module absent, or `MESHD_BATMAN=0`) the mesh interface is
 > bridged directly onto `lan` as before: single-hop wireless backhaul (house →
