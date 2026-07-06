@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-06
+
 ### Added
 - **Topology clients labelled by hostname/IP, not MAC (#35).** The topology view
   showed each associated client as a raw MAC, which is poor UX. `GET /topology`
@@ -83,12 +85,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the backhaul-model change above), so wired + mesh never bridge-loop. Verified
   end-to-end on hardware: reset → wired auto-onboard → mesh-node, pulling the real
   home profile.
+
+## [0.4.0] - 2026-06-17
+
+### Changed
 - **Zero-touch defaults.** A fresh kit now self-forms with no configuration: the
   controller's `adopt_policy` defaults to `onlink` (auto-adopt only nodes
   verified to be on its own LAN) and a node's `auto_onboard_wired` defaults to on,
   so powering the first device makes it a controller and cabling a node joins it.
   Set `adopt_policy=off` / `auto_onboard_wired=0` to require the wizard. Network
-  posture management (`manage_network`) defaults on — set it to `0` to opt out.
+  posture management (`manage_network`) stays opt-in.
 
 ### Fixed
 - **Topology view now draws lines between the real nodes (#27/#28/#33).**
@@ -446,7 +452,9 @@ control plane, a native LuCI app, and signed opkg **and** apk package feeds.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/and-elf/omm/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/and-elf/omm/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/and-elf/omm/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/and-elf/omm/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/and-elf/omm/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/and-elf/omm/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/and-elf/omm/compare/v0.1.0...v0.1.1
