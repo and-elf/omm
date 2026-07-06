@@ -29,6 +29,7 @@ type apiHandler struct {
 	selfHomeID      string
 	topology        *topology.Collector
 	topoAgg         *topology.Aggregator
+	leases          topology.LeaseSource
 	signals         SignalSource
 	scan            Scanner
 	meshClientAuth  bool
@@ -119,6 +120,14 @@ func WithTopology(collector *topology.Collector) Option {
 		h.topology = collector
 		h.topoAgg = topology.NewAggregator(90*time.Second, 5*time.Minute, nil)
 	}
+}
+
+// WithClientLeases resolves associated clients' DHCP leases (IP + hostname) when
+// serving GET /topology, so the view can label a client by a recognizable name
+// instead of its MAC (#35). Leases are read where the merged graph is served —
+// on the controller, which runs the home's authoritative DHCP.
+func WithClientLeases(src topology.LeaseSource) Option {
+	return func(h *apiHandler) { h.leases = src }
 }
 
 // WithSignalSource enables the GET /home-selection endpoint, feeding observed

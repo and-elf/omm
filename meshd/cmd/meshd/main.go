@@ -276,6 +276,10 @@ func main() {
 		api.WithSelf(id, cfg.Serial),
 		api.WithSelfHome(cfg.HomeID),
 		api.WithTopology(collector),
+		// Resolve associated clients to their DHCP-assigned IP/hostname from this
+		// controller's dnsmasq leases, so the topology view labels a client by name
+		// rather than its MAC (#35).
+		api.WithClientLeases(topology.DnsmasqLeases{}),
 		api.WithSignalSource(wifiClients),
 		api.WithSetupCompleteHook(completeSetupLocal),
 		api.WithUplinkProvisioner(func(ctx context.Context, ssid, key string) error {

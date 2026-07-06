@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { relativeTime, signalClass, speedLabel, toElements, tqClass } from './topology'
+import { clientLabel, relativeTime, signalClass, speedLabel, toElements, tqClass } from './topology'
 
 describe('topology element builder', () => {
   it('classifies signal across four tiers', () => {
@@ -79,6 +79,35 @@ describe('topology element builder', () => {
     expect(assoc?.data.source).toBe('self')
     expect(assoc?.data.label).toBe('-55 dBm 5GHz')
     expect(assoc?.classes).toContain('assoc--good')
+  })
+
+  it('labels a client by hostname, then IP, then MAC (#35)', () => {
+    expect(clientLabel({ mac: 'aa:bb', ap: 'self', signal: -50, hostname: 'laptop', ip: '10.0.0.5' })).toBe(
+      'laptop',
+    )
+    expect(clientLabel({ mac: 'aa:bb', ap: 'self', signal: -50, ip: '10.0.0.5' })).toBe('10.0.0.5')
+    expect(clientLabel({ mac: 'aa:bb', ap: 'self', signal: -50 })).toBe('aa:bb')
+  })
+
+  it('renders a client node labelled by hostname/IP with mac and ip kept in data (#35)', () => {
+    const els = toElements({
+      nodes: [{ id: 'self', label: 'Gateway', role: 'self' }],
+      links: null,
+      clients: [
+        { mac: 'aa:bb:cc:dd:ee:01', ap: 'self', signal: -55, hostname: 'laptop', ip: '192.168.1.50' },
+        { mac: 'aa:bb:cc:dd:ee:02', ap: 'self', signal: -60, ip: '192.168.1.51' },
+        { mac: 'aa:bb:cc:dd:ee:99', ap: 'self', signal: -70 },
+      ],
+    })
+
+    const named = els.find((e) => e.data.id === 'client:aa:bb:cc:dd:ee:01')
+    expect(named?.data.label).toBe('laptop')
+    expect(named?.data.mac).toBe('aa:bb:cc:dd:ee:01')
+    expect(named?.data.ip).toBe('192.168.1.50')
+
+    expect(els.find((e) => e.data.id === 'client:aa:bb:cc:dd:ee:02')?.data.label).toBe('192.168.1.51')
+    // No lease resolved: falls back to the raw MAC.
+    expect(els.find((e) => e.data.id === 'client:aa:bb:cc:dd:ee:99')?.data.label).toBe('aa:bb:cc:dd:ee:99')
   })
 
   it('marks a node that degraded to multi-AP and carries mesh_mode', () => {

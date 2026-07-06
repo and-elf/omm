@@ -68,6 +68,56 @@ func TestTopologyAggregatesReports(t *testing.T) {
 	}
 }
 
+// stubLeases is a fixed LeaseSource for tests.
+type stubLeases map[string]topology.Lease
+
+func (s stubLeases) Leases(context.Context) map[string]topology.Lease { return s }
+
+// GET /topology enriches associated clients with the DHCP-assigned IP/hostname
+// so the view can label them by name instead of MAC (#35).
+func TestTopologyEnrichesClientsWithLeases(t *testing.T) {
+	db, _ := storage.OpenDB(":memory:")
+	t.Cleanup(func() { db.Close() })
+	collector := topology.NewCollector("ctrl", "Gateway", nil, nil, nil, nil)
+	leases := stubLeases{
+		"aa:bb:cc:dd:ee:01": {IP: "192.168.1.50", Hostname: "laptop"},
+		"aa:bb:cc:dd:ee:02": {IP: "192.168.1.51"}, // IP only, no hostname
+	}
+	router := NewRouter(storage.NewStore(db), noopProfileManager{},
+		WithTopology(collector), WithClientLeases(leases))
+
+	report := topologyReport{NodeID: "n1", Graph: topology.Graph{
+		Nodes: []topology.Node{{ID: "n1", Role: "self"}},
+		Clients: []topology.Client{
+			{MAC: "aa:bb:cc:dd:ee:01", AP: "n1", Signal: -55},
+			{MAC: "aa:bb:cc:dd:ee:02", AP: "n1", Signal: -60},
+			{MAC: "aa:bb:cc:dd:ee:99", AP: "n1", Signal: -70}, // no lease
+		},
+	}}
+	if rw := postJSON(t, router, "/topology/report", report); rw.Code != http.StatusAccepted {
+		t.Fatalf("report: expected 202, got %d", rw.Code)
+	}
+
+	rw := doGet(t, router, "/topology")
+	var g topology.Graph
+	if err := json.Unmarshal(rw.Body.Bytes(), &g); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byMAC := map[string]topology.Client{}
+	for _, c := range g.Clients {
+		byMAC[c.MAC] = c
+	}
+	if c := byMAC["aa:bb:cc:dd:ee:01"]; c.IP != "192.168.1.50" || c.Hostname != "laptop" {
+		t.Errorf("leased client not enriched: %+v", c)
+	}
+	if c := byMAC["aa:bb:cc:dd:ee:02"]; c.IP != "192.168.1.51" || c.Hostname != "" {
+		t.Errorf("IP-only client wrong: %+v", c)
+	}
+	if c := byMAC["aa:bb:cc:dd:ee:99"]; c.IP != "" || c.Hostname != "" {
+		t.Errorf("unleased client should stay bare: %+v", c)
+	}
+}
+
 // An onboarded node that has never reported its topology must still appear in
 // the merged graph as a down vertex, so an operator can see it failed to come up
 // instead of it silently missing from the map (#29). The inventory comes from

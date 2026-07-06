@@ -171,23 +171,32 @@ Office
 
 ## Client Mapping
 
-Example:
+Each associated station is reported by the node whose AP it joined (MAC, RSSI,
+band, tx/rx rate). The controller then enriches it with the client's
+DHCP-assigned **IP** and **hostname**, so the view can label a client by a
+recognizable name instead of a raw MAC — tracking MACs is poor UX (#35):
 
 ```json
 {
-  "client": "Laptop",
+  "mac": "aa:bb:cc:dd:ee:01",
   "ap": "Office",
   "signal": -51,
-  "band": "5GHz"
+  "band": "5GHz",
+  "ip": "192.168.1.50",
+  "hostname": "laptop"
 }
 ```
 
-UI displays:
+### Lease resolution
 
-```text
-Client
-Connected AP
-Signal
-Traffic
-Roaming History
-```
+IP/hostname are resolved **on the controller**, not the reporting node: the
+controller runs the home's authoritative DHCP, while a member node is a bridged
+dumb AP that holds no leases. `GET /topology` looks each client's MAC up in
+dnsmasq's lease file (`/tmp/dhcp.leases`) after merging reports, filling `ip`
+and `hostname`. A hostname of `*` (client offered none) is dropped, and a client
+with no lease — static, self-addressed, or transient — keeps `ip`/`hostname`
+absent.
+
+The Topology view labels a client node by **hostname**, falling back to **IP**,
+then the **MAC** when neither resolved. The MAC and IP are retained on the node's
+data so the raw identifiers stay available.
