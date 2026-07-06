@@ -114,5 +114,21 @@ Reconfiguring `network`/`firewall` on a live device can lock out an operator, so
 > at boot and on the claim/join transitions). **Off by default** — verify the
 > Guest transition on the target board before enabling, since bridging the
 > uplink and disabling the routed WAN can strand a hand-wired device. The
-> Mesh-node posture currently only stands down authoritative DHCP; fuller mesh
-> bridging and the batman-adv layer are follow-ups.
+> Mesh-node posture now authors the **bridged shape** (`lan` as a DHCP client,
+> routed `wan` disabled, authoritative DHCP off) so a claimed node is a pure L2
+> bridge into the home and its mesh traffic egresses via the controller's single
+> gateway — a claimed node that keeps its own routed/NAT'd `wan` leaves the
+> bridged mesh an island that can't reach the home WAN.
+>
+> **Who owns the physical uplink port depends on the forwarding layer.** With
+> batman-adv active (`MESHD_BATMAN`, default), `bat0` is the device bridged into
+> `br-lan` and the batman port classifier owns the wired ports — it enslaves
+> peer-facing `br-lan` members out to `bat0` as backhaul hardifs. So the
+> Mesh-node posture does **not** fold the uplink into `br-lan` (that would undo
+> the enslavement on every apply and recreate the storming `br-lan`+`bat0` double
+> path); it leaves the port to the classifier. The uplink is already a
+> `br-lan`-member candidate from the Guest phase every device passes through, so
+> the classifier still sees it. Without batman (plain-L2 fallback) the Mesh-node
+> posture folds the uplink in itself. **Guest always folds** — a still-discovering
+> device has no active home/profile and thus no live `bat0` to defer to, and L2
+> adjacency is what discovery needs.

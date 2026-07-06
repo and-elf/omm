@@ -206,8 +206,9 @@ func main() {
 	// it controls its home). Opt-in; default off so a hand-wired device is never
 	// reconfigured unexpectedly. applyPosture is a no-op when disabled.
 	posture := netposture.NewManager(uciClient, netposture.Config{
-		UplinkPort: cfg.UplinkPort,
-		LanDevice:  cfg.LanDevice,
+		UplinkPort:   cfg.UplinkPort,
+		LanDevice:    cfg.LanDevice,
+		BatmanActive: cfg.BatmanEnable,
 	})
 	applyPosture := func(ctx context.Context) {
 		if !cfg.ManageNetwork {

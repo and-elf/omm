@@ -164,20 +164,92 @@ func TestApplyControllerRestoresGateway(t *testing.T) {
 	}
 }
 
-// A mesh node only stands down authoritative DHCP (the controller serves), and
-// leaves wan/bridge alone.
-func TestApplyMeshNodeStandsDownDHCPOnly(t *testing.T) {
+// Without batman (plain-L2 fallback) a mesh node authors the full bridged
+// single-gateway posture (the same shape as Guest): fold the uplink jack into
+// br-lan, run lan as a DHCP client, disable the routed wan, and stand down
+// authoritative DHCP. Otherwise a claimed node keeps a routed/NAT'd wan of its
+// own and its bridged mesh is an island — mesh traffic can't reach the home WAN,
+// which only egresses via the controller's single gateway.
+func TestApplyMeshNodeBridgesIntoHome(t *testing.T) {
 	f := newFakeUCI()
-	m := NewManager(f, Config{UplinkPort: "wan", LanDevice: "@device[0]"})
+	m := NewManager(f, Config{UplinkPort: "wan", LanDevice: "@device[0]"}) // BatmanActive defaults false
 
 	if err := m.Apply(context.Background(), RoleMeshNode); err != nil {
 		t.Fatalf("apply mesh node: %v", err)
 	}
-	if f.sets["dhcp.lan.ignore"] != "1" {
-		t.Fatalf("expected DHCP stood down; sets=%v", f.sets)
+	if !contains(f.adds, "network.@device[0].ports=wan") {
+		t.Fatalf("uplink not folded into br-lan; adds=%v", f.adds)
 	}
-	if len(f.adds) != 0 || len(f.dels) != 0 || f.sets["network.wan.disabled"] != "" {
-		t.Fatalf("mesh node must not touch wan/bridge; adds=%v dels=%v sets=%v", f.adds, f.dels, f.sets)
+	for k, want := range map[string]string{
+		"network.lan.proto":     "dhcp",
+		"network.wan.disabled":  "1",
+		"network.wan6.disabled": "1",
+		"dhcp.lan.ignore":       "1",
+	} {
+		if f.sets[k] != want {
+			t.Fatalf("set %s = %q, want %q (sets=%v)", k, f.sets[k], want, f.sets)
+		}
+	}
+	if f.lastOp() != "reload" {
+		t.Fatalf("expected reload last, ops=%v", f.ops)
+	}
+}
+
+// With batman active, a mesh node must NOT fold the uplink into br-lan — bat0 is
+// the bridged backhaul and the batman classifier owns the physical uplink port.
+// Re-adding it to br-lan on every apply would undo the classifier's enslavement
+// and recreate the storming br-lan+bat0 double path. The L3 posture (lan DHCP
+// client, wan disabled, authoritative DHCP off) is still authored.
+func TestApplyMeshNodeBatmanActiveLeavesUplinkToClassifier(t *testing.T) {
+	f := newFakeUCI()
+	m := NewManager(f, Config{UplinkPort: "wan", LanDevice: "@device[0]", BatmanActive: true})
+
+	if err := m.Apply(context.Background(), RoleMeshNode); err != nil {
+		t.Fatalf("apply mesh node: %v", err)
+	}
+	if len(f.adds) != 0 {
+		t.Fatalf("batman-active mesh node must not fold the uplink into br-lan; adds=%v", f.adds)
+	}
+	for k, want := range map[string]string{
+		"network.lan.proto":    "dhcp",
+		"network.wan.disabled": "1",
+		"dhcp.lan.ignore":      "1",
+	} {
+		if f.sets[k] != want {
+			t.Fatalf("L3 posture still required; set %s = %q, want %q (sets=%v)", k, f.sets[k], want, f.sets)
+		}
+	}
+}
+
+// Guest folds the uplink even when batman is enabled: a still-discovering device
+// has no active home/profile yet, so bat0 is not up and there is no classifier to
+// defer to — L2 adjacency is what discovery needs.
+func TestApplyGuestFoldsEvenWithBatmanActive(t *testing.T) {
+	f := newFakeUCI()
+	m := NewManager(f, Config{UplinkPort: "wan", LanDevice: "@device[0]", BatmanActive: true})
+
+	if err := m.Apply(context.Background(), RoleGuest); err != nil {
+		t.Fatalf("apply guest: %v", err)
+	}
+	if !contains(f.adds, "network.@device[0].ports=wan") {
+		t.Fatalf("guest must fold the uplink regardless of batman; adds=%v", f.adds)
+	}
+}
+
+// A mesh node on a board with no known bridge layout still stands down (no
+// mis-bridging), exactly as Guest does — the two share the bridged posture.
+func TestApplyMeshNodeSkipsBridgeWhenUnconfigured(t *testing.T) {
+	f := newFakeUCI()
+	m := NewManager(f, Config{})
+
+	if err := m.Apply(context.Background(), RoleMeshNode); err != nil {
+		t.Fatalf("apply mesh node: %v", err)
+	}
+	if len(f.adds) != 0 {
+		t.Fatalf("expected no bridge edit, adds=%v", f.adds)
+	}
+	if f.sets["dhcp.lan.ignore"] != "1" || f.sets["network.lan.proto"] != "dhcp" {
+		t.Fatalf("expected DHCP stood down + lan DHCP-client; sets=%v", f.sets)
 	}
 }
 

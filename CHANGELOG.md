@@ -29,6 +29,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   auto-selected by band, which picks the AX3600's 2.4 GHz radio (`radio2`).
 
 ### Changed
+- **Mesh-node network posture now bridges into the home (single gateway).** A
+  claimed satellite (`manage_network=1`) previously only stood down its
+  authoritative DHCP, leaving its own routed/NAT'd `wan` up — so its bridged
+  802.11s mesh was an island and mesh traffic could not reach the home WAN, which
+  egresses only through the controller's gateway over the mesh. The Mesh-node
+  posture now authors the same bridged shape as Guest: `lan` becomes a DHCP
+  client, the routed `wan`/`wan6` are disabled, and authoritative DHCP is stood
+  down, so the node's default route points at the controller. When batman-adv is
+  the forwarding layer (`MESHD_BATMAN`, the default) the uplink is left to the
+  batman port classifier instead of being folded into `br-lan` — `bat0` is the
+  bridged backhaul and re-adding the uplink on every apply would fight the
+  classifier and recreate the storming `br-lan`+`bat0` double path (the uplink is
+  already a `br-lan` candidate from the Guest phase). Without batman the posture
+  folds the uplink in itself; Guest folds regardless (no active home yet ⇒ no
+  `bat0` to defer to). Still gated behind `manage_network` (off by default).
+  Verified end-to-end on hardware: reset → Guest → wired auto-onboard → mesh-node,
+  surviving both a meshd restart and a reboot.
 - **Zero-touch defaults.** A fresh kit now self-forms with no configuration: the
   controller's `adopt_policy` defaults to `onlink` (auto-adopt only nodes
   verified to be on its own LAN) and a node's `auto_onboard_wired` defaults to on
