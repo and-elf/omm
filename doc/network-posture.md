@@ -35,20 +35,37 @@ DHCP removes the two-servers-on-one-segment conflict. This matches the
 discovery doc's "same bridged LAN" assumption — which the default router posture
 silently violated.
 
-### Any port (cabling)
+### Any port (cabling) — issue #42
 
-In Guest posture the operator should not have to care which jack they use:
+On a **non-controller** node the operator should not have to care which jack they
+use, for either connecting a computer or extending the network with another node:
 
-* **LAN ports** are already members of `br-lan`, which Guest runs as a DHCP
-  client — so plugging into any LAN port works, and which one does not matter.
-* The **WAN port** is auto-detected (`network.wan.device`) and bridged into
-  `br-lan` too, so it works the same as a LAN port.
+* **LAN ports** are already members of `br-lan` — so plugging into any LAN port
+  works, and which one does not matter.
+* The **WAN port** is stood down as a routed uplink (`network.wan.disabled=1`)
+  and folded into `br-lan` too, so it is a plain bridge **relay** port exactly
+  like a LAN port. Both Guest and the claimed mesh-node posture fold it.
 * A **single-jack AP** (a range-extender-style device with one ethernet jack)
-  works whether that lone port is wired as `wan` (auto-detected and bridged in)
-  or as `lan` (already in `br-lan`).
+  works whether that lone port is wired as `wan` (stood down and bridged in) or as
+  `lan` (already in `br-lan`).
 
 So whichever ethernet jack the installer plugs into, the node lands on the home
-L2 and discovers the controller.
+L2 — a computer gets a controller DHCP lease and another node extends the network
+by plain L2 bridging over the fast wire. The 802.11s mesh is a **carrier-loss
+backhaul standby**: the daemon's failover brings it up only if the node's wired
+uplink drops (see [network model](network-model.md)), so the wire is always
+preferred and a wired+wireless bridge loop never forms.
+
+A **controller** is the exception: its **WAN port is the routed internet uplink**
+and is never folded into `br-lan` or offered to the classifier. Its LAN ports
+still take clients and wired backhaul like any other node.
+
+> Because folding the wan jack requires standing down the routed wan (a netdev
+> cannot be both `network.wan`'s device and a `br-lan` member), and a satellite
+> that keeps its own DHCP would be a rogue server on the home segment, "any port
+> works" is inseparable from posture management — which is why `manage_network`
+> defaults **on** (see below). `manage_network=0` opts a hand-wired device out
+> entirely, leaving its ports as the operator cabled them.
 
 The setup AP keeps working in Guest posture: it has its **own** network/dhcp
 sections ([`internal/setupap`](../internal/setupap)), independent of `lan`, so a
@@ -103,7 +120,7 @@ Reconfiguring `network`/`firewall` on a live device can lock out an operator, so
 
 | UCI (`meshd.main`) | Env | Default | Behaviour |
 |--------------------|-----|---------|-----------|
-| `manage_network` | `MESHD_MANAGE_NETWORK` | `0` | Enable lifecycle posture management. |
+| `manage_network` | `MESHD_MANAGE_NETWORK` | `1` | Lifecycle posture management. **On by default** — it is what makes any ethernet jack work on a non-controller (#42). Set `0` to opt a hand-wired device out entirely. |
 | `uplink_port` | `MESHD_UPLINK_PORT` | _(empty = auto)_ | Wired uplink device bridged into `br-lan` in Guest posture. Empty auto-detects it from `network.wan.device`, so **any jack works** without per-board config — including a single-jack AP whose only port is wired as `wan`. Set explicitly only to override. |
 | `lan_device` | `MESHD_LAN_DEVICE` | `@device[0]` | UCI section of the LAN bridge device whose `ports` list is edited. |
 
@@ -111,24 +128,22 @@ Reconfiguring `network`/`firewall` on a live device can lock out an operator, so
 > ([`internal/netposture`](../internal/netposture)): `DecideRole`
 > (lifecycle → posture), `Apply` (authors the Guest/Controller/Mesh-node UCI via
 > the new list-valued `uci` `add_list`/`del_list`), and the daemon wiring (apply
-> at boot and on the claim/join transitions). **Off by default** — verify the
-> Guest transition on the target board before enabling, since bridging the
-> uplink and disabling the routed WAN can strand a hand-wired device. The
-> Mesh-node posture now authors the **bridged shape** (`lan` as a DHCP client,
+> at boot and on the claim/join transitions). **On by default** (`manage_network`,
+> opt-out) — a non-controller stands down its routed WAN and every ethernet jack
+> joins the home L2 so any device works on any port (#42), while a controller
+> keeps the stock routed-WAN gateway untouched. `manage_network=0` opts a
+> hand-wired device out entirely. The
+> Mesh-node posture authors the **bridged shape** (`lan` as a DHCP client,
 > routed `wan` disabled, authoritative DHCP off) so a claimed node is a pure L2
 > bridge into the home and its mesh traffic egresses via the controller's single
 > gateway — a claimed node that keeps its own routed/NAT'd `wan` leaves the
 > bridged mesh an island that can't reach the home WAN.
 >
-> **Who owns the physical uplink port depends on the forwarding layer.** With
-> batman-adv active (`MESHD_BATMAN`, default), `bat0` is the device bridged into
-> `br-lan` and the batman port classifier owns the wired ports — it enslaves
-> peer-facing `br-lan` members out to `bat0` as backhaul hardifs. So the
-> Mesh-node posture does **not** fold the uplink into `br-lan` (that would undo
-> the enslavement on every apply and recreate the storming `br-lan`+`bat0` double
-> path); it leaves the port to the classifier. The uplink is already a
-> `br-lan`-member candidate from the Guest phase every device passes through, so
-> the classifier still sees it. Without batman (plain-L2 fallback) the Mesh-node
-> posture folds the uplink in itself. **Guest always folds** — a still-discovering
-> device has no active home/profile and thus no live `bat0` to defer to, and L2
-> adjacency is what discovery needs.
+> **Every ethernet jack is a plain `br-lan` relay port.** Both Guest and the
+> Mesh-node posture fold the wan jack into `br-lan` (LAN jacks are already there),
+> so any device works on any port (#42). Wired ports are never enslaved to
+> batman-adv by default — the 802.11s mesh + `bat0` is a **carrier-loss backhaul
+> standby** the daemon's failover brings up only when the wired uplink drops, so
+> the fast wire stays primary and wired + mesh never bridge-loop (see
+> [network model](network-model.md)). An explicit `MESHD_BATMAN_PORTS` still
+> enslaves named ports for a deliberate wired batman backhaul.

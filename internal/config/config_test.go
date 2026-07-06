@@ -191,3 +191,18 @@ func TestBatmanDefaultsOnAndConfigurable(t *testing.T) {
 		t.Errorf("BatmanPorts = %v, want [eth0 eth1]", c.BatmanPorts)
 	}
 }
+
+// Network posture management is on by default (opt-out), so a non-controller
+// node stands down its routed wan and every ethernet jack works as a client or
+// backhaul port with zero config (issue #42). manage_network=0 opts out for a
+// hand-wired device.
+func TestManageNetworkDefaultsOnAndCanBeDisabled(t *testing.T) {
+	t.Setenv("MESHD_MANAGE_NETWORK", "")
+	if c := Load(); !c.ManageNetwork {
+		t.Fatal("expected manage_network on by default")
+	}
+	t.Setenv("MESHD_MANAGE_NETWORK", "0")
+	if c := Load(); c.ManageNetwork {
+		t.Fatal("expected manage_network disabled when MESHD_MANAGE_NETWORK=0")
+	}
+}

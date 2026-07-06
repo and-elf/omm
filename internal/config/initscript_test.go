@@ -62,3 +62,19 @@ func TestInitScriptExportsBatmanOptions(t *testing.T) {
 		}
 	}
 }
+
+// Network posture management defaults ON (opt-out): the init script's config_get
+// fallback must be 1 so a device with no explicit manage_network still stands
+// down its routed wan and makes every ethernet jack work (issue #42). A stale
+// `0` fallback would silently keep the old opt-in behaviour on unconfigured
+// devices even though the daemon default flipped.
+func TestInitScriptManageNetworkDefaultsOn(t *testing.T) {
+	const initPath = "../../package/meshd/files/meshd.init"
+	b, err := os.ReadFile(initPath)
+	if err != nil {
+		t.Fatalf("read init script: %v", err)
+	}
+	if !regexp.MustCompile(`config_get manage_network main manage_network 1\b`).MatchString(string(b)) {
+		t.Error("meshd.init must default manage_network to 1 (opt-out); fallback is not 1")
+	}
+}
