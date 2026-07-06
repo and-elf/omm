@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dual-band AP with no configuration; set a single band (e.g. `["5g"]`) to opt
   out. Bands absent on a node are skipped (not fatal), and narrowing `ap_bands`
   prunes the now-stale `omm_ap_<band>` sections on re-apply.
+- **Xiaomi AX3600 as a build/deploy target.** `build-devices.sh` gains an
+  `ax3600` label and `deploy.sh` recognises it. The board is a Qualcomm IPQ8071A
+  (qualcommax/ipq807x, Cortex-A53) — the same `aarch64_cortex-a53` ISA group as
+  the ZB8103AX, so the release feed's arm64 package already covered it; this just
+  makes the local dev tooling first-class for it. Because two boards now share
+  one ISA, `deploy.sh` disambiguates by `board_name` (`xiaomi,ax3600`) before
+  falling back to `uname -m`. No profile changes were needed: the mesh radio is
+  auto-selected by band, which picks the AX3600's 2.4 GHz radio (`radio2`).
 
 ### Changed
 - **Zero-touch defaults.** A fresh kit now self-forms with no configuration: the
